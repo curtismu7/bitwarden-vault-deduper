@@ -1,8 +1,8 @@
 {
   "name": "pingone-oauth-playground",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Interactive playground for PingOne OAuth 2.0 and OpenID Connect",
-  "main": "src/main.jsx",
+  "main": "src/main.tsx",
   "type": "module",
   "scripts": {
     "start": "./start-interactive.sh",
@@ -15,7 +15,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "format": "prettier --write \"**/*.{js,jsx,json,md}\"",
-    "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0"
+    "lint": "eslint . --ext .ts,.tsx --report-unused-disable-directives --max-warnings 0"
   },
   "keywords": [
     "oauth",
@@ -45,6 +45,7 @@
     "@types/react": "^18.3.24",
     "@types/react-dom": "^18.3.7",
     "@types/styled-components": "^5.1.34",
+    "@vitejs/plugin-basic-ssl": "^1.0.1",
     "@vitejs/plugin-react": "^4.0.3",
     "eslint": "^8.45.0",
     "eslint-plugin-react": "^7.32.2",

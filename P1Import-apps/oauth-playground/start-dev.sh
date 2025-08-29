@@ -1,13 +1,18 @@
 #!/bin/bash
 
 # OAuth Playground Enhanced Startup Script
-# Provides detailed server status with nice formatting and icons
+# Provides detailed server status with nice formatting and icons, and logs to logs/startup.log
 
 echo ""
 echo "╔══════════════════════════════════════════════════════════════════════════════╗"
 echo "║                           🔐 OAUTH PLAYGROUND 🔐                           ║"
 echo "╚══════════════════════════════════════════════════════════════════════════════╝"
 echo ""
+
+# Prepare logging
+LOG_DIR="logs"
+LOG_FILE="$LOG_DIR/startup.log"
+mkdir -p "$LOG_DIR"
 
 # Get system information
 PORT=${PORT:-3000}
@@ -16,6 +21,11 @@ NPM_VERSION=$(npm --version)
 MEMORY_TOTAL=$(echo "$(sysctl -n hw.memsize) / 1024 / 1024 / 1024" | bc 2>/dev/null || echo "Unknown")
 MEMORY_USED=$(ps -o rss= -p $$ | awk '{print $1/1024/1024}' | bc 2>/dev/null || echo "0")
 CPU_CORES=$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo "Unknown")
+NODE_ENV=${NODE_ENV:-development}
+TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S %Z')
+APP_VERSION=$(grep -m1 '"version"' package.json | sed -E 's/.*"version"\s*:\s*"([^"]+)".*/\1/' 2>/dev/null || echo "Unknown")
+GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "N/A")
+GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "N/A")
 
 # Display system info
 echo "📊 System Information:"
@@ -23,7 +33,18 @@ echo "   • Node.js: $NODE_VERSION"
 echo "   • NPM: $NPM_VERSION"
 echo "   • Memory: ${MEMORY_USED}MB / ${MEMORY_TOTAL}GB"
 echo "   • CPU Cores: $CPU_CORES"
+echo "   • Node Env: $NODE_ENV"
+echo "   • App Version: $APP_VERSION"
+echo "   • Git: $GIT_BRANCH@$GIT_COMMIT"
 echo ""
+
+# Write summary to startup.log
+{
+  echo "[$TIMESTAMP] OAuth Playground Startup"
+  echo "Node: $NODE_VERSION | NPM: $NPM_VERSION | Env: $NODE_ENV"
+  echo "App Version: $APP_VERSION | Git: $GIT_BRANCH@$GIT_COMMIT"
+  echo "Memory: ${MEMORY_USED}MB / ${MEMORY_TOTAL}GB | CPU Cores: $CPU_CORES"
+} >> "$LOG_FILE"
 
 # Check if .env file exists and has PingOne config
 if [ -f ".env" ]; then
@@ -44,7 +65,11 @@ echo ""
 # Start the development server
 echo "🚀 Starting OAuth Playground Development Server..."
 echo "   Port: $PORT"
-echo "   URL: http://localhost:$PORT/"
+echo "   URL: https://localhost:$PORT/"
+{
+  echo "Starting dev server on port $PORT"
+  echo "Local URL: https://localhost:$PORT/"
+} >> "$LOG_FILE"
 echo ""
 
 # Run Vite dev server in background and capture output
@@ -61,8 +86,16 @@ if kill -0 $VITE_PID 2>/dev/null; then
     echo "║                              🎉 SERVER READY! 🎉                            ║"
     echo "╠══════════════════════════════════════════════════════════════════════════════╣"
     echo "║                                                                            ║"
-    printf "║  🌐 Local URL:   %-55s ║\n" "http://localhost:$PORT/"
-    printf "║  🌍 Network URL: %-55s ║\n" "http://$(hostname -I 2>/dev/null | awk '{print $1}'):$PORT/"
+    LOCAL_URL="https://localhost:$PORT/"
+    NETWORK_HOST=$(hostname -I 2>/dev/null | awk '{print $1}')
+    NETWORK_URL="https://$NETWORK_HOST:$PORT/"
+    printf "║  🌐 Local URL:   %-55s ║\n" "$LOCAL_URL"
+    printf "║  🌍 Network URL: %-55s ║\n" "$NETWORK_URL"
+    {
+      echo "Server Ready"
+      echo "Local URL: $LOCAL_URL"
+      echo "Network URL: $NETWORK_URL"
+    } >> "$LOG_FILE"
     echo "║                                                                            ║"
     echo "║  📱 Available Pages:                                                       ║"
     echo "║     • /                 - Dashboard (Overview)                             ║"

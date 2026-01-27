@@ -1,12 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import styled from 'styled-components';
-import { 
-  FiHome, FiCode, FiLock, FiUser, FiSettings, 
-  FiChevronDown, FiChevronRight, FiBookOpen 
+import {
+  FiHome, FiCode, FiUser, FiSettings,
+  FiChevronDown, FiBookOpen, FiLogOut
 } from 'react-icons/fi';
+import { useAuth } from '../contexts/AuthContext';
 
-const SidebarContainer = styled.aside`
+const SidebarContainer = styled.aside<{ $isOpen: boolean }>`
   position: fixed;
   top: 60px;
   left: 0;
@@ -18,9 +19,9 @@ const SidebarContainer = styled.aside`
   transition: transform 0.3s ease;
   overflow-y: auto;
   padding: 1rem 0;
-  
+
   @media (max-width: ${({ theme }) => theme.breakpoints.lg}) {
-    transform: ${({ isOpen }) => isOpen ? 'translateX(0)' : 'translateX(-100%)'};
+    transform: ${({ $isOpen }) => $isOpen ? 'translateX(0)' : 'translateX(-100%)'};
   }
 `;
 
@@ -68,9 +69,9 @@ const NavItem = styled(NavLink)`
   }
 `;
 
-const Submenu = styled.div`
+const Submenu = styled.div<{ $isOpen: boolean }>`
   overflow: hidden;
-  max-height: ${({ isOpen }) => isOpen ? '500px' : '0'};
+  max-height: ${({ $isOpen }) => $isOpen ? '500px' : '0'};
   transition: max-height 0.3s ease-in-out;
 `;
 
@@ -84,7 +85,7 @@ const SubmenuItem = styled(NavLink)`
   transition: all 0.2s;
   
   &:hover {
-    background-color: ${({ theme }) => theme.colors.gray50};
+    background-color: ${({ theme }) => theme.colors.gray100};
     color: ${({ theme }) => theme.colors.primary};
   }
   
@@ -112,7 +113,7 @@ const NavItemWithSubmenu = styled.div`
   user-select: none;
 `;
 
-const NavItemHeader = styled.div`
+const NavItemHeader = styled.div<{ $isOpen: boolean }>`
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -131,13 +132,14 @@ const NavItemHeader = styled.div`
   
   svg:last-child {
     transition: transform 0.2s;
-    transform: rotate(${({ isOpen }) => isOpen ? '0deg' : '-90deg'});
+    transform: rotate(${({ $isOpen }) => $isOpen ? '0deg' : '-90deg'});
   }
 `;
 
-const Sidebar = ({ isOpen, onClose }) => {
+const Sidebar = ({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) => {
   const location = useLocation();
-  const [openMenus, setOpenMenus] = useState({
+  const { logout, isAuthenticated } = useAuth();
+  const [openMenus, setOpenMenus] = useState<{ flows: boolean; oidc: boolean }>({
     flows: false,
     oidc: false,
   });
@@ -151,15 +153,15 @@ const Sidebar = ({ isOpen, onClose }) => {
     });
   }, [location.pathname]);
 
-  const toggleMenu = (menu) => {
+  const toggleMenu = (menu: string) => {
     setOpenMenus(prev => ({
       ...prev,
-      [menu]: !prev[menu]
+      [menu]: !prev[menu as keyof typeof prev]
     }));
   };
 
   return (
-    <SidebarContainer isopen={isOpen}>
+    <SidebarContainer $isOpen={isOpen}>
       <NavSection>
         <NavItem to="/dashboard" onClick={onClose}>
           <FiHome />
@@ -173,7 +175,7 @@ const Sidebar = ({ isOpen, onClose }) => {
         <NavItemWithSubmenu>
           <NavItemHeader 
             onClick={() => toggleMenu('flows')}
-            isopen={openMenus.flows}
+            $isOpen={openMenus.flows}
           >
             <div>
               <FiCode />
@@ -182,7 +184,7 @@ const Sidebar = ({ isOpen, onClose }) => {
             <FiChevronDown />
           </NavItemHeader>
           
-          <Submenu isopen={openMenus.flows}>
+          <Submenu $isOpen={openMenus.flows}>
             <SubmenuItem to="/flows/authorization-code" onClick={onClose}>
               Authorization Code
             </SubmenuItem>
@@ -204,7 +206,7 @@ const Sidebar = ({ isOpen, onClose }) => {
         <NavItemWithSubmenu>
           <NavItemHeader 
             onClick={() => toggleMenu('oidc')}
-            isopen={openMenus.oidc}
+            $isOpen={openMenus.oidc}
           >
             <div>
               <FiUser />
@@ -213,11 +215,11 @@ const Sidebar = ({ isOpen, onClose }) => {
             <FiChevronDown />
           </NavItemHeader>
           
-          <Submenu isopen={openMenus.oidc}>
-            <SubmenuItem to="/oidc/userinfo" onClick={onClose}>
+          <Submenu $isOpen={openMenus.oidc}>
+            <SubmenuItem to="/oidc" onClick={onClose}>
               UserInfo Endpoint
             </SubmenuItem>
-            <SubmenuItem to="/oidc/tokens" onClick={onClose}>
+            <SubmenuItem to="/oidc" onClick={onClose}>
               ID Tokens
             </SubmenuItem>
           </Submenu>
@@ -226,15 +228,67 @@ const Sidebar = ({ isOpen, onClose }) => {
       
       <NavSection>
         <NavSectionTitle>Resources</NavSectionTitle>
-        <NavItem to="/documentation" onClick={onClose}>
-          <FiBookOpen />
+        <a
+          href="https://apidocs.pingidentity.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            padding: '0.75rem 1.5rem',
+            color: '#495057',
+            textDecoration: 'none',
+            fontWeight: 500
+          }}
+          onClick={onClose}
+        >
+          <FiBookOpen style={{ marginRight: '0.75rem', fontSize: '1.25rem' }} />
           <span>Documentation</span>
-        </NavItem>
+        </a>
         <NavItem to="/configuration" onClick={onClose}>
           <FiSettings />
           <span>Configuration</span>
         </NavItem>
       </NavSection>
+
+      {isAuthenticated && (
+        <div style={{
+          position: 'absolute',
+          bottom: '20px',
+          left: '1.5rem',
+          right: '1.5rem',
+          padding: '1rem 0',
+          borderTop: '1px solid #e9ecef'
+        }}>
+          <button
+            onClick={() => {
+              logout();
+              onClose();
+            }}
+            style={{
+              width: '100%',
+              padding: '0.75rem',
+              backgroundColor: '#dc3545',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '0.5rem',
+              fontSize: '0.9rem',
+              fontWeight: '500',
+              transition: 'background-color 0.2s'
+            }}
+            onMouseEnter={(e) => (e.target as HTMLButtonElement).style.backgroundColor = '#c82333'}
+            onMouseLeave={(e) => (e.target as HTMLButtonElement).style.backgroundColor = '#dc3545'}
+          >
+            <FiLogOut size={16} />
+            Logout
+          </button>
+        </div>
+      )}
     </SidebarContainer>
   );
 };

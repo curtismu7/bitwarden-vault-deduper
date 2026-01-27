@@ -1,4 +1,77 @@
 // OAuth 2.0 and OpenID Connect Type Definitions
+import 'styled-components';
+
+// Extend styled-components default theme
+declare module 'styled-components' {
+  export interface DefaultTheme {
+    colors: {
+      primary: string;
+      primaryLight: string;
+      primaryDark: string;
+      secondary: string;
+      success: string;
+      danger: string;
+      warning: string;
+      info: string;
+      light: string;
+      dark: string;
+      gray100: string;
+      gray200: string;
+      gray300: string;
+      gray400: string;
+      gray500: string;
+      gray600: string;
+      gray700: string;
+      gray800: string;
+      gray900: string;
+    };
+    fonts: {
+      body: string;
+      mono: string;
+    };
+    shadows: {
+      sm: string;
+      md: string;
+      lg: string;
+    };
+    breakpoints: {
+      sm: string;
+      md: string;
+      lg: string;
+      xl: string;
+    };
+  }
+}
+
+// Auth Context Types
+export interface User {
+  id?: string;
+  name?: string;
+  email?: string;
+  given_name?: string;
+  family_name?: string;
+  picture?: string;
+  authenticated?: boolean;
+}
+
+export interface LoginCredentials {
+  email: string;
+  password: string;
+}
+
+export interface LoginResult {
+  success: boolean;
+  error?: string;
+}
+
+export interface AuthContextType {
+  user: User | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+  login: (credentials?: LoginCredentials) => Promise<LoginResult>;
+  logout: () => void;
+  handleCallback: (callbackUrl: string) => Promise<void>;
+}
 export interface OAuthConfig {
   clientId: string;
   clientSecret: string;

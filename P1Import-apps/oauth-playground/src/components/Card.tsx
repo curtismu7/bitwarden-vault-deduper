@@ -1,15 +1,17 @@
 import React from 'react';
 import styled, { css } from 'styled-components';
 
-const CardContainer = styled.div`
+type Accent = 'primary' | 'success' | 'danger' | 'warning' | 'info';
+
+const CardContainer = styled.div<{ $accent?: Accent }>`
   background-color: white;
   border-radius: 0.5rem;
   box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
   overflow: hidden;
   transition: all 0.2s ease-in-out;
   
-  ${({ accent }) => {
-    if (!accent) return '';
+  ${({ $accent }) => {
+    if (!$accent) return '';
     
     const accentColors = {
       primary: '#003087',
@@ -20,7 +22,7 @@ const CardContainer = styled.div`
     };
     
     return css`
-      border-top: 3px solid ${accentColors[accent] || accentColors.primary};
+      border-top: 3px solid ${accentColors[$accent] || accentColors.primary};
     `;
   }}
 `;
@@ -52,17 +54,26 @@ const CardBody = styled.div`
 
 const CardFooter = styled.div`
   padding: 1rem 1.5rem;
-  background-color: ${({ theme }) => theme.colors.gray50};
-  border-top: 1px solid ${({ theme }) => theme.colors.gray200};
+  background-color: ${({ theme }) => theme.colors.gray100};
+  border-top: 1px solid ${({ theme }) => theme.colors.gray300};
   
   & > :last-child {
     margin-bottom: 0;
   }
 `;
 
-const Card = ({ children, className, accent }) => {
+interface CardProps {
+  children: React.ReactNode;
+  className?: string;
+  accent?: Accent;
+}
+
+const Card: React.FC<CardProps> = ({ children, className, accent }) => {
   return (
-    <CardContainer className={className} accent={accent}>
+    <CardContainer
+      className={className}
+      {...(accent ? ({ $accent: accent } as { $accent: Accent }) : {})}
+    >
       {children}
     </CardContainer>
   );

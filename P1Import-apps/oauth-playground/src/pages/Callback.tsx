@@ -12,7 +12,7 @@ const CallbackContainer = styled.div`
   min-height: 100vh;
   padding: 2rem;
   text-align: center;
-  background-color: ${({ theme }) => theme.colors.gray50};
+  background-color: ${({ theme }) => theme.colors.gray100};
 `;
 
 const Card = styled.div`
@@ -84,7 +84,7 @@ const Button = styled.button`
 const Callback = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { handleOAuthCallback } = useAuth();
+  const { handleCallback } = useAuth();
   const [status, setStatus] = useState('processing');
   const [error, setError] = useState('');
 
@@ -92,7 +92,7 @@ const Callback = () => {
     const processCallback = async () => {
       try {
         // Get the full URL with query parameters
-        const params = {};
+        const params: Record<string, string> = {};
         for (const [key, value] of searchParams.entries()) {
           params[key] = value;
         }
@@ -103,26 +103,22 @@ const Callback = () => {
         }
         
         // Process the OAuth callback
-        const result = await handleOAuthCallback(window.location.href);
+        await handleCallback(window.location.href);
+        setStatus('success');
         
-        if (result.success) {
-          setStatus('success');
-          // Redirect to the dashboard or the original URL after a short delay
-          setTimeout(() => {
-            navigate('/dashboard', { replace: true });
-          }, 2000);
-        } else {
-          throw new Error(result.error || 'Authentication failed');
-        }
+        // Redirect to the dashboard after a short delay
+        setTimeout(() => {
+          navigate('/dashboard', { replace: true });
+        }, 2000);
       } catch (err) {
         console.error('OAuth callback error:', err);
         setStatus('error');
-        setError(err.message || 'An error occurred during authentication');
+        setError(err instanceof Error ? err.message : 'An error occurred during authentication');
       }
     };
     
     processCallback();
-  }, [searchParams, navigate, handleOAuthCallback]);
+  }, [searchParams, navigate, handleCallback]);
 
   const handleRetry = () => {
     // Redirect to the login page to start the flow again

@@ -1,25 +1,19 @@
 // OAuth 2.0 and OpenID Connect Utility Functions
 import {
-  OAuthConfig,
-  AuthorizationRequest,
-  TokenRequest,
-  TokenResponse,
   IdTokenPayload,
-  UserInfo,
-  OAuthError,
-  OAuthFlow
+  UserInfo
 } from '../types/oauth';
-
-import { randomBytes, createHash } from 'crypto';
 
 /**
  * Generate a random string for state parameter
  * @param {number} length - Length of the random string
  * @returns {string} Random string
  */
-export const generateRandomString = (length = 32) => {
-  return randomBytes(Math.ceil(length / 2))
-    .toString('hex')
+export const generateRandomString = (length = 32): string => {
+  const array = new Uint8Array(Math.ceil(length / 2));
+  crypto.getRandomValues(array);
+  return Array.from(array, byte => byte.toString(16).padStart(2, '0'))
+    .join('')
     .slice(0, length);
 };
 
@@ -40,7 +34,7 @@ export const generateCodeChallenge = async (codeVerifier: string): Promise<strin
   const encoder = new TextEncoder();
   const data = encoder.encode(codeVerifier);
   const hash = await crypto.subtle.digest('SHA-256', data);
-  
+
   // Convert the ArrayBuffer to a base64url string
   return btoa(String.fromCharCode(...new Uint8Array(hash)))
     .replace(/\+/g, '-')
@@ -55,12 +49,12 @@ export const generateCodeChallenge = async (codeVerifier: string): Promise<strin
  */
 export const parseUrlParams = (url: string): Record<string, string> => {
   const params = new URLSearchParams(url.split('?')[1] || '');
-  const result = {};
-  
+  const result: Record<string, string> = {};
+
   for (const [key, value] of params.entries()) {
     result[key] = value;
   }
-  
+
   // Also check hash parameters
   const hash = url.split('#')[1];
   if (hash) {
@@ -69,7 +63,7 @@ export const parseUrlParams = (url: string): Record<string, string> => {
       result[key] = value;
     }
   }
-  
+
   return result;
 };
 
@@ -95,21 +89,30 @@ export const buildAuthUrl = ({
   codeChallenge,
   codeChallengeMethod = 'S256',
   responseType = 'code',
+}: {
+  authEndpoint: string;
+  clientId: string;
+  redirectUri: string;
+  scope: string;
+  state: string;
+  codeChallenge?: string;
+  codeChallengeMethod?: string;
+  responseType?: string;
 }) => {
   const url = new URL(authEndpoint);
   const params = new URLSearchParams();
-  
+
   params.append('client_id', clientId);
   params.append('redirect_uri', redirectUri);
   params.append('response_type', responseType);
   params.append('scope', scope);
   params.append('state', state);
-  
+
   if (codeChallenge) {
     params.append('code_challenge', codeChallenge);
     params.append('code_challenge_method', codeChallengeMethod);
   }
-  
+
   url.search = params.toString();
   return url.toString();
 };
@@ -132,38 +135,45 @@ export const exchangeCodeForTokens = async ({
   code,
   codeVerifier,
   clientSecret,
+}: {
+  tokenEndpoint: string;
+  clientId: string;
+  redirectUri: string;
+  code: string;
+  codeVerifier?: string;
+  clientSecret?: string;
 }) => {
   const body = new URLSearchParams();
   body.append('grant_type', 'authorization_code');
   body.append('client_id', clientId);
   body.append('redirect_uri', redirectUri);
   body.append('code', code);
-  
+
   if (codeVerifier) {
     body.append('code_verifier', codeVerifier);
   }
-  
-  const headers = {
+
+  const headers: Record<string, string> = {
     'Content-Type': 'application/x-www-form-urlencoded',
   };
-  
+
   // For confidential clients, use Basic Auth or include client_secret in the body
   if (clientSecret) {
     const credentials = btoa(`${clientId}:${clientSecret}`);
     headers['Authorization'] = `Basic ${credentials}`;
   }
-  
+
   const response = await fetch(tokenEndpoint, {
     method: 'POST',
     headers,
     body,
   });
-  
+
   if (!response.ok) {
     const error = await response.json();
     throw new Error(error.error_description || 'Failed to exchange code for tokens');
   }
-  
+
   return response.json();
 };
 
@@ -181,35 +191,42 @@ export const validateIdToken = async (idToken: string, clientId: string, issuer:
   if (parts.length !== 3) {
     throw new Error('Invalid ID token format');
   }
-  
+
   try {
-    const header = JSON.parse(atob(parts[0]));
     const payload = JSON.parse(atob(parts[1]));
-    
+
+    console.log('🔍 ID Token Validation Debug:');
+    console.log('  - Token issuer (iss):', payload.iss);
+    console.log('  - Expected issuer:', issuer);
+    console.log('  - Token audience (aud):', payload.aud);
+    console.log('  - Expected audience (clientId):', clientId);
+
     // Verify the issuer
     if (payload.iss !== issuer) {
+      console.error('❌ Issuer mismatch:', { expected: issuer, actual: payload.iss });
       throw new Error('Invalid issuer');
     }
-    
+
     // Verify the audience
     if (payload.aud !== clientId) {
+      console.error('❌ Audience mismatch:', { expected: clientId, actual: payload.aud });
       throw new Error('Invalid audience');
     }
-    
+
     // Verify the token is not expired
     const now = Math.floor(Date.now() / 1000);
     if (payload.exp && payload.exp < now) {
       throw new Error('Token has expired');
     }
-    
+
     // Verify the token is not used before the 'nbf' (not before) time
     if (payload.nbf && payload.nbf > now) {
       throw new Error('Token is not yet valid');
     }
-    
+
     // Note: In a real app, you should also verify the token signature
     // using the JWKS endpoint of the identity provider
-    
+
     return payload;
   } catch (error) {
     console.error('Error validating ID token:', error);
@@ -243,7 +260,7 @@ export const getUserInfo = async (userInfoEndpoint: string, accessToken: string)
  * @param {string} token - JWT token
  * @returns {Object} Decoded token payload
  */
-export const parseJwt = (token) => {
+export const parseJwt = (token: string) => {
   try {
     const base64Url = token.split('.')[1];
     const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');

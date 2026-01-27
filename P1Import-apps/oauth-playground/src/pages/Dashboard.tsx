@@ -1,7 +1,6 @@
-import React from 'react';
 import styled from 'styled-components';
-import { Card, CardHeader, CardBody, CardFooter } from '../components/Card';
-import { FiCode, FiLock, FiUser, FiSettings, FiInfo } from 'react-icons/fi';
+import { Card, CardBody } from '../components/Card';
+import { FiCode, FiLock, FiUser, FiInfo } from 'react-icons/fi';
 import { useAuth } from '../contexts/AuthContext';
 
 const DashboardContainer = styled.div`
@@ -62,8 +61,14 @@ const FeatureCard = styled(Card)`
   }
 `;
 
+const ProfileCard = styled(Card)`
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+`;
+
 const Dashboard = () => {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
 
   const features = [
     {
@@ -107,6 +112,22 @@ const Dashboard = () => {
             </div>
           </CardBody>
         </Card>
+      )}
+
+      {isAuthenticated && (
+        <ProfileCard accent="primary" className="mb-6">
+          <CardBody>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <FiUser />
+              <div>
+                <div style={{ fontWeight: 600 }}>{user?.name || 'Signed in'}</div>
+                {user?.email && (
+                  <div style={{ color: '#6b7280', fontSize: '0.9rem' }}>{user.email}</div>
+                )}
+              </div>
+            </div>
+          </CardBody>
+        </ProfileCard>
       )}
 
       <h2 className="text-xl font-semibold mb-4">Available Features</h2>

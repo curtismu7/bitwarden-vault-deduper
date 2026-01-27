@@ -444,16 +444,25 @@ const Login = () => {
   const toggleClientSecretVisibility = () => setShowClientSecret(!showClientSecret);
   const [saveStatus, setSaveStatus] = useState<{ type: string; title: string; message: string } | null>(null);
   
-  const { login, isAuthenticated } = useAuth();
+  const { login, logout, isAuthenticated } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   
   const from = location.state?.from?.pathname || '/';
   
+  console.log('🔍 Login Page Debug:');
+  console.log('  - isAuthenticated:', isAuthenticated);
+  console.log('  - Current path:', location.pathname);
+  console.log('  - Redirect target:', from);
+  
   // Redirect if already authenticated
   useEffect(() => {
+    console.log('🔄 Login redirect check:', { isAuthenticated, from });
     if (isAuthenticated) {
+      console.log('✅ Redirecting authenticated user to:', from);
       navigate(from, { replace: true });
+    } else {
+      console.log('❌ User not authenticated, staying on login page');
     }
   }, [isAuthenticated, navigate, from]);
   
@@ -608,9 +617,9 @@ const Login = () => {
                 <li>
                   <strong>Redirect URIs:</strong>
                   <span style={{ fontWeight: '800', fontSize: '1rem', color: '#0070CC', marginLeft: '0.5rem' }}>
-                    http://localhost:3000/callback
+                    https://localhost:3000/callback
                     <button
-                      onClick={() => copyToClipboard('http://localhost:3000/callback', 'setup-redirect-uri')}
+                      onClick={() => copyToClipboard('https://localhost:3000/callback', 'setup-redirect-uri')}
                       style={{
                         background: 'none',
                         border: '1px solid #0070CC',
@@ -783,9 +792,9 @@ const Login = () => {
               <CredentialRow>
                 <p><strong>Redirect URI:</strong></p>
                 <CredentialWrapper>
-                  <code>http://localhost:3000/callback</code>
+                  <code>https://localhost:3000/callback</code>
                   <CopyButton
-                    onClick={() => copyToClipboard('http://localhost:3000/callback', 'redirect-uri')}
+                    onClick={() => copyToClipboard('https://localhost:3000/callback', 'redirect-uri')}
                     title="Copy Redirect URI"
                   >
                     {copiedId === 'redirect-uri' ? <FiCheck size={16} /> : <FiCopy size={16} />}
@@ -831,10 +840,30 @@ const Login = () => {
               )}
 
               <div style={{ textAlign: 'center', padding: '2rem 0' }}>
-                <SubmitButton onClick={handleLogin} disabled={isLoading} style={{ width: 'auto', padding: '0.75rem 2rem' }}>
-                  <FiLogIn />
-                  {isLoading ? 'Redirecting...' : 'Login with PingOne'}
-                </SubmitButton>
+                {isAuthenticated ? (
+                  <div>
+                    <p style={{ marginBottom: '1rem', color: '#28a745' }}>
+                      ✅ You are logged in!
+                    </p>
+                    <SubmitButton
+                      onClick={() => logout()}
+                      style={{
+                        width: 'auto',
+                        padding: '0.75rem 2rem',
+                        backgroundColor: '#6c757d',
+                        marginRight: '1rem'
+                      }}
+                    >
+                      <FiLogIn />
+                      Logout
+                    </SubmitButton>
+                  </div>
+                ) : (
+                  <SubmitButton onClick={handleLogin} disabled={isLoading} style={{ width: 'auto', padding: '0.75rem 2rem' }}>
+                    <FiLogIn />
+                    {isLoading ? 'Redirecting...' : 'Login with PingOne'}
+                  </SubmitButton>
+                )}
               </div>
             </LoginBody>
           </LoginCard>

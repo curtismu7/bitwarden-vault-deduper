@@ -50,6 +50,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const savedConfig = savedConfigRaw ? JSON.parse(savedConfigRaw) : {};
       const savedCreds = savedCredsRaw ? JSON.parse(savedCredsRaw) : {};
 
+      console.log('🔍 Debug: Runtime Config Sources');
+      console.log('  - pingone_config:', savedConfig);
+      console.log('  - login_credentials:', savedCreds);
+
       // Prefer explicit config from Configuration page; fall back to credentials from Login page
       const envId = savedConfig.environmentId || savedCreds.environmentId || pingOneConfig.environmentId;
       const apiUrl = pingOneConfig.apiUrl || 'https://auth.pingone.com';
@@ -62,7 +66,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const userInfoEndpoint = savedConfig.userInfoEndpoint || `${authBase}/userinfo`;
       const logoutEndpoint = `${authBase}/signoff`;
 
-      return {
+      const config = {
         environmentId: envId,
         clientId: savedConfig.clientId || savedCreds.clientId || pingOneConfig.clientId,
         clientSecret: savedConfig.clientSecret || savedCreds.clientSecret || pingOneConfig.clientSecret,
@@ -77,6 +81,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         userInfoEndpoint,
         logoutEndpoint,
       };
+
+      console.log('✅ Debug: Final Config Used:', config);
+      return config;
     } catch (e) {
       console.warn('Failed to load runtime config, using defaults.', e);
       return pingOneConfig;
@@ -89,9 +96,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       try {
         const tokens = oauthStorage.getTokens();
 
+        console.log('🔍 Auth Initialization Debug:');
+        console.log('  - Tokens found:', !!tokens);
+        console.log('  - Access token present:', !!tokens?.access_token);
+        console.log('  - Token expiry:', tokens?.expires_at);
+
         if (tokens?.access_token) {
           // Validate if token is still valid
           if (tokens.expires_at && Date.now() < tokens.expires_at) {
+            console.log('✅ Token is valid, setting authenticated');
             setIsAuthenticated(true);
 
             // Try to get user info if available
@@ -203,6 +216,24 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
       `;
 
+      // Function to color-code the authorization URL
+      const createColorCodedUrl = (url: string) => {
+        const segments = url.split(/[?&]/);
+        const baseUrl = segments[0];
+        const params = segments.slice(1);
+
+        let coloredHtml = `<span style="color: #2563eb; font-weight: 500;">${baseUrl}</span>`;
+
+        params.forEach((param, index) => {
+          const separator = index === 0 ? '?' : '&';
+          const colors = ['#dc2626', '#16a34a', '#ca8a04', '#9333ea', '#0891b2', '#be185d'];
+          const color = colors[index % colors.length];
+          coloredHtml += `<span style="color: #6b7280; font-weight: 400;">${separator}</span><span style="color: ${color}; font-weight: 500;">${param}</span>`;
+        });
+
+        return coloredHtml;
+      };
+
       modalContent.innerHTML = `
         <h2 style="margin-top: 0; color: #0070CC; font-size: 1.5rem;">🔍 Authorization Request Debug</h2>
         <p style="color: #666; margin-bottom: 1.5rem;">Review the parameters being sent to PingOne:</p>
@@ -218,7 +249,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         </div>
         <div style="margin: 1.5rem 0; padding: 1rem; background: #e3f2fd; border-radius: 8px; font-size: 0.9rem;">
           <strong>Full Authorization URL:</strong><br>
-          <span style="word-break: break-all; color: #0070CC;">${debugParams.authorization_url}</span>
+          <div style="font-family: 'Monaco', 'Menlo', monospace; font-size: 0.85rem; margin-top: 0.5rem; word-break: break-all; line-height: 1.4;">
+            ${createColorCodedUrl(debugParams.authorization_url)}
+          </div>
         </div>
         <div style="text-align: right; margin-top: 1.5rem;">
           <button id="debug-continue" style="
@@ -279,7 +312,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       setIsLoading(true);
 
+      console.log('🔍 Callback Debug:');
+      console.log('  - Callback URL:', callbackUrl);
+
       const params = parseUrlParams(callbackUrl);
+      console.log('  - Parsed params:', params);
+      console.log('  - Code present:', !!params.code);
+      console.log('  - State present:', !!params.state);
+
       const { code, state, error, error_description } = params;
 
       // Check for OAuth errors
@@ -293,7 +333,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       // Verify state parameter for CSRF protection
       const storedState = oauthStorage.getState();
+      console.log('🔍 State Parameter Debug:');
+      console.log('  - Received state:', state);
+      console.log('  - Stored state:', storedState);
+      console.log('  - States match:', state === storedState);
+
       if (!storedState || state !== storedState) {
+        console.error('❌ State parameter mismatch');
         throw new Error('Invalid state parameter');
       }
 
@@ -328,11 +374,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       // Validate ID token if present
       if (tokenResponse.id_token) {
-        await clientLog(`ID_TOKEN validate iss=${cfg.apiUrl}/${cfg.environmentId} aud=${cfg.clientId}`);
+        await clientLog(`ID_TOKEN validate iss=${cfg.apiUrl}/${cfg.environmentId}/as aud=${cfg.clientId}`);
         const idTokenClaims = await validateIdToken(
           tokenResponse.id_token,
           cfg.clientId,
-          `${cfg.apiUrl}/${cfg.environmentId}`
+          `${cfg.apiUrl}/${cfg.environmentId}/as`
         );
 
         // Set user information from ID token

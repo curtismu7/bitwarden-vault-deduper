@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import styled, { ThemeProvider } from 'styled-components';
 import { AuthProvider } from './contexts/AuthContext';
@@ -7,6 +7,8 @@ import Navbar from './components/Navbar';
 import Sidebar from './components/Sidebar';
 import Dashboard from './pages/Dashboard';
 import Flows from './pages/Flows';
+import AuthorizationCodeFlow from './pages/AuthorizationCodeFlow';
+import ImplicitFlow from './pages/ImplicitFlow';
 import Configuration from './pages/Configuration';
 import Documentation from './pages/Documentation';
 import Login from './pages/Login';
@@ -34,7 +36,7 @@ const MainContent = styled.main`
   }
 `;
 
-const ProtectedRoute = ({ children }) => {
+const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const { isAuthenticated, isLoading } = useAuth();
   const location = useLocation();
 
@@ -84,8 +86,8 @@ const AppRoutes = () => {
               <Flows />
             </ProtectedRoute>
           }>
-            <Route path="authorization-code" element={<div>Authorization Code Flow</div>} />
-            <Route path="implicit" element={<div>Implicit Flow</div>} />
+            <Route path="authorization-code" element={<AuthorizationCodeFlow />} />
+            <Route path="implicit" element={<ImplicitFlow />} />
             <Route path="client-credentials" element={<div>Client Credentials Flow</div>} />
             <Route path="pkce" element={<div>PKCE Flow</div>} />
             <Route path="device-code" element={<div>Device Code Flow</div>} />

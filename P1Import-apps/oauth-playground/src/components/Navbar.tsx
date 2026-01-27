@@ -1,7 +1,8 @@
-import React from 'react';
+import type { FC } from 'react';
 import styled from 'styled-components';
-import { FiMenu, FiSettings, FiHelpCircle, FiLogIn, FiLogOut } from 'react-icons/fi';
+import { FiMenu, FiSettings, FiHelpCircle, FiLogIn, FiLogOut, FiUser } from 'react-icons/fi';
 import { useAuth } from '../contexts/AuthContext';
+import { Link } from 'react-router-dom';
 
 const NavbarContainer = styled.nav`
   position: fixed;
@@ -16,6 +17,24 @@ const NavbarContainer = styled.nav`
   padding: 0 1.5rem;
   z-index: 1000;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+`;
+
+const UserChip = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 9999px;
+  background-color: rgba(255, 255, 255, 0.15);
+  margin-right: 0.5rem;
+  max-width: 320px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  span {
+    font-size: 0.9rem;
+  }
 `;
 
 const Logo = styled.div`
@@ -72,8 +91,12 @@ const MenuButton = styled.button`
   }
 `;
 
-const Navbar = ({ toggleSidebar }) => {
-  const { isAuthenticated, logout } = useAuth();
+interface NavbarProps {
+  toggleSidebar: () => void;
+}
+
+const Navbar: FC<NavbarProps> = ({ toggleSidebar }) => {
+  const { isAuthenticated, user, logout } = useAuth();
 
   return (
     <NavbarContainer>
@@ -86,24 +109,30 @@ const Navbar = ({ toggleSidebar }) => {
       </Logo>
       
       <NavItems>
-        <a href="/documentation" title="Documentation">
+        {isAuthenticated && (
+          <UserChip title={user?.email || user?.name || 'Signed in'}>
+            <FiUser />
+            <span>{user?.name || 'Signed in'}</span>
+          </UserChip>
+        )}
+        <a href="https://apidocs.pingidentity.com" target="_blank" rel="noopener noreferrer" title="Documentation (opens in new tab)">
           <FiHelpCircle />
           <span>Docs</span>
         </a>
-        <a href="/configuration" title="Settings">
+        <Link to="/configuration" title="Settings">
           <FiSettings />
           <span>Settings</span>
-        </a>
+        </Link>
         {isAuthenticated ? (
           <button onClick={logout} title="Logout">
             <FiLogOut />
             <span>Logout</span>
           </button>
         ) : (
-          <a href="/login" title="Login">
+          <Link to="/login" title="Login">
             <FiLogIn />
             <span>Login</span>
-          </a>
+          </Link>
         )}
       </NavItems>
     </NavbarContainer>

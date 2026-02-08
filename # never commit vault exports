@@ -1,0 +1,20 @@
+# never commit vault exports
+*.json
+*.csv
+*.zip
+
+# downloads / backups
+*export*
+*backup*
+*deletions*
+*dedup*
+*organized*
+
+# OS/editor junk
+.DS_Store
+Thumbs.db
+*.log
+
+# local dev
+node_modules/
+.vercel/

@@ -1,0 +1,16 @@
+{
+  "name": "Bitwarden Vault Deduper",
+  "short_name": "Vault Deduper",
+  "description": "Safely analyze and deduplicate Bitwarden vault exports locally.",
+  "start_url": "/index.html",
+  "display": "standalone",
+  "background_color": "#1f2937",
+  "theme_color": "#1f2937",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "16x16 32x32 48x48",
+      "type": "image/x-icon"
+    }
+  ]
+}

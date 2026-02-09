@@ -1,0 +1,2448 @@
+<!doctype html>
+<html lang="en">
+<head>
+
+<link rel="icon" href="/favicon.ico">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#1f2937">
+
+
+
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Bitwarden Vault Deduper v4.12 <span data-version="4.9" class="ml-2 inline-flex items-center rounded-full bg-slate-200 px-2 py-0.5 text-xs font-black text-slate-700">v4.12</span></title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <meta name="description" content="Review and dedupe Bitwarden exports: exact dupes, fuzzy matches, domain normalization, and safe deletion backups." />
+  <meta name="theme-color" content="#0f172a" />
+  
+<style>
+/* domain grid tiles should fill their grid cell */
+  #domainList > * { width: 100%; }
+
+  /* constrain buttons to normal size */
+  button{width:auto !important; display:inline-flex; align-items:center; justify-content:center; white-space:nowrap;}
+
+  button { font-size: 13px; padding: 6px 12px; }
+  button svg { width: 16px; height: 16px; }
+/* Smoother scrolling for long tables (prevents paint jank) */
+.smooth-scroll-panel{
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  contain: content;
+}
+
+</style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+  
+  <!-- Busy overlay -->
+  <div id="busyOverlay" class="hidden fixed inset-0 z-50">
+    <div class="absolute inset-0 bg-slate-900/30 backdrop-blur-[1px]"></div>
+    <div class="relative h-full w-full flex items-center justify-center p-6">
+      <div class="w-full max-w-md rounded-2xl bg-white shadow-xl border border-slate-200 p-5">
+        <div class="flex items-center gap-4">
+          <div class="h-10 w-10 rounded-full border-4 border-slate-200 border-t-slate-700 animate-spin"></div>
+          <div class="min-w-0">
+            <div class="text-base font-extrabold text-slate-900" id="busyTitle">Working…</div>
+            <div class="mt-1 text-sm font-semibold text-slate-600" id="busyDetail">Processing your vault data.</div>
+          </div>
+        </div>
+        <div class="mt-4 text-[11px] font-semibold text-slate-500">
+          Tip: Large exports can take a bit. This page will stay responsive after it finishes.
+        </div>
+      </div>
+    </div>
+  </div>
+<div class="w-full max-w-screen-2xl mx-auto px-6 py-4">
+    <div class="flex flex-wrap items-end justify-between gap-3">
+      <div>
+        <h1 class="text-2xl font-extrabold tracking-tight">Bitwarden Vault Review & Deletion Export</h1>
+    <div class="mt-3 rounded-2xl border-2 border-red-300 bg-red-50 px-3 py-1.5">
+      <div class="text-red-700 text-lg md:text-xl font-extrabold tracking-tight">
+        <span class="font-black">Use at your own risk</span>. This deletes entries from your JSON Export but will not delete directly from Bitwarden.
+      </div>
+
+    <div class="mt-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        
+  <div class="w-full max-w-screen-2xl mx-auto px-6 mt-4">
+    <div class="bg-white rounded-xl shadow-sm p-4">
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <div class="text-xs font-bold text-slate-700 mb-2">File 1</div>
+            <input id="fileInput1" type="file" accept=".json,application/json" class="block w-full text-sm" />
+            <div id="originalFileName" class="mt-2 text-xs font-semibold text-slate-600">Not loaded</div>
+          </div>
+          <div>
+            <div class="text-xs font-bold text-slate-700 mb-2">File 2 (optional)</div>
+            <input id="fileInput2" type="file" accept=".json,application/json" class="block w-full text-sm" />
+            <div id="secondFileName" class="mt-2 text-xs font-semibold text-slate-600">Not loaded</div>
+          </div>
+    <div id="statsMount" class="mt-3"><div id="stats" class="text-sm font-extrabold text-slate-700"></div></div>
+  </div>
+
+<div class="text-xs font-extrabold text-slate-800">Workflow</div>
+        <div id="appliedState" class="hidden rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-800">
+          Rules applied • <span id="appliedWhen">—</span> • Marked: <span id="appliedCount">0</span>
+        </div>
+      </div>
+      
+  <div class="w-full max-w-screen-2xl mx-auto px-6">
+    <div class="w-full rounded-2xl border border-amber-200 bg-amber-50 p-4 shadow-sm">
+      <div class="rounded-xl border border-amber-200 bg-amber-50 p-3">
+          <div class="text-sm font-black text-amber-900">Safety mode</div>
+          <div class="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <label class="flex items-center gap-2 rounded-lg border border-amber-200 bg-white px-3 py-1.5 text-sm font-semibold text-amber-900">
+              <input type="radio" name="safetyMode" id="modeSafe" value="safe" checked>
+              Safe (exact dupes only)
+            </label>
+            <label class="flex items-center gap-2 rounded-lg border border-amber-200 bg-white px-3 py-1.5 text-sm font-semibold text-amber-900">
+              <input type="radio" name="safetyMode" id="modeStandard" value="standard">
+              Standard (exact + null‑pw dupes + blank creds)
+            </label>
+            <label class="flex items-center gap-2 rounded-lg border border-amber-200 bg-white px-3 py-1.5 text-sm font-semibold text-amber-900">
+              <input type="radio" name="safetyMode" id="modeAggressive" value="aggressive">
+              Aggressive (includes fuzzy + all null‑pw)
+            </label>
+          </div>
+          <div class="mt-2 text-[11px] font-semibold text-amber-900/80">
+            You can still override manually per item after GO.
+          </div>
+        </div>
+    </div>
+  </div>
+
+  <div class="w-full max-w-screen-2xl mx-auto px-6 mt-4">
+    <details open class="w-full rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <summary class="cursor-pointer select-none px-5 py-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="text-sm font-black text-slate-800 uppercase tracking-wide">Options</div>
+            <div class="mt-1 text-xs font-semibold text-slate-500">Choose what to auto-mark on GO and what to normalize. You can still override per item.</div>
+          </div>
+          <div class="text-xs font-extrabold text-slate-500">Click to collapse</div>
+        </div>
+      </summary>
+      <div class="px-5 pb-5">
+        <div class="w-full rounded-2xl border border-slate-200 bg-slate-50 p-5">
+        <!-- Safety mode moved to top -->
+
+
+        <div class="text-xs font-extrabold text-slate-700">Options</div>
+
+        <div class="mt-3 space-y-2">
+          <label class="hidden">
+  <input id="optShowPw" type="checkbox" checked />
+</label>
+          <label class="flex items-center gap-2 text-sm font-semibold text-slate-700">
+            <input id="optShowExactOnly" type="checkbox" class="rounded border-slate-300" />
+            Show exact duplicates (same username + password)
+          </label>
+
+          <label class="flex items-center gap-2 text-sm font-semibold text-slate-700">
+            <input id="optPreviewExact" type="checkbox" class="rounded border-slate-300" />
+            Preview deletions for exact dupes (auto-check oldest)
+          </label>
+          <div class="ml-6 -mt-1 text-[11px] font-semibold text-slate-500">
+            Turning this on will check the delete box for the oldest item in each exact-dupe set (you can uncheck anything).
+          </div>
+
+          <label class="flex items-center gap-2 text-sm font-semibold text-slate-700">
+            <input id="optAutoExact" type="checkbox" class="rounded border-slate-300" checked />
+            Auto-delete exact dupes (on GO) — keep newest, delete oldest
+          </label>
+
+          <div class="mt-2 pt-2 border-t">
+            <label class="flex items-center gap-2 text-sm font-semibold text-slate-700">
+              <input id="optFuzzy" type="checkbox" class="rounded border-slate-300" />
+              Fuzzy match
+            </label>
+            <label class="text-xs font-bold text-slate-600 block mt-1">Threshold</label>
+            <input id="optFuzzyThreshold" type="number" min="0" max="1" step="0.01" value="0.88"
+                   class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm" />
+            <div class="mt-2 text-xs text-slate-600 font-semibold">
+              Fuzzy score = 0.70·name + 0.25·username + 0.05·domain overlap
+            </div>
+
+            <div class="mt-2 flex gap-2">
+              <button id="markFuzzyDeletesBtn" class="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-extrabold hover:bg-slate-100">
+                Mark suggested fuzzy deletes (older) <span id="fuzzySpinner" class="hidden ml-2 inline-block align-middle h-4 w-4 rounded-full border-2 border-slate-400/60 border-t-slate-800 animate-spin"></span>
+              </button>
+              <button id="clearFuzzyDeletesBtn" class="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-extrabold hover:bg-slate-100">
+                Clear fuzzy selections
+              </button>
+              <div class="text-[11px] text-slate-500 font-semibold self-center">
+                Shows what would be deleted; only marks when you click this.
+              </div>
+            </div>
+
+          </div>
+
+          <div class="mt-2 pt-2 border-t space-y-2">
+            <label class="flex items-center gap-2 text-sm font-semibold text-slate-700">
+              <input id="optNullPwDupes" type="checkbox" class="rounded border-slate-300" checked />
+              Auto-delete null-password dupes (on GO)
+            </label>
+
+            <div class="ml-6 mt-1 text-[11px] font-semibold text-slate-500">
+              Deletes logins with an empty password <span class="font-extrabold text-slate-700">only when the same username exists with a real password</span>.
+            </div>
+
+            <div class="ml-6 mt-1 text-[11px] font-semibold text-slate-500">
+              Null-password logins: <span class="npTotal font-extrabold text-slate-700">0</span> •
+              Safer (has sibling with real password): <span class="npSafer font-extrabold text-slate-700">0</span> •
+              Review (no sibling found): <span class="npReview font-extrabold text-slate-700">0</span>
+            </div>
+
+
+            <label class="flex items-center gap-2 text-sm font-semibold text-slate-700">
+              <input id="optAllNullPw" type="checkbox" class="rounded border-slate-300" />
+              Auto-delete all null-password items (on GO)
+            </label>
+
+            <div class="ml-6 mt-1 text-[11px] font-semibold text-red-700">
+              Deletes <span class="font-black">every</span> login with an empty password (even if there&apos;s no other entry with a real password).
+            </div>
+
+            <div class="ml-6 mt-1 text-[11px] font-semibold text-slate-500">
+              Null-password logins: <span class="npTotal font-extrabold text-slate-700">0</span> •
+              Safer (has sibling with real password): <span class="npSafer font-extrabold text-slate-700">0</span> •
+              Review (no sibling found): <span class="npReview font-extrabold text-slate-700">0</span>
+            </div>
+
+
+            <label class="flex items-center gap-2 text-sm font-semibold text-slate-700">
+              <input id="optBlankUP" type="checkbox" class="rounded border-slate-300" checked />
+              Auto-delete blank username+password login items (on GO)
+            </label>
+            <label class="flex items-center gap-2 text-sm font-semibold text-slate-700">
+              <input id="optNormalizeUris" type="checkbox" class="rounded border-slate-300" />
+              Normalize URIs to https://host (leave Ping sites untouched)
+            </label>
+
+            <div class="ml-6 mt-2 p-2 rounded-lg border border-slate-200 bg-slate-50">
+              <div class="text-xs font-extrabold text-slate-700">Exclude domains from normalization</div>
+              <div class="mt-2 flex gap-2">
+                <input id="excludeDomainInput" list="domainOptions" class="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+                       placeholder="Type a domain (example.com) or wildcard (*.example.com) then Add" />
+                <button id="addExcludeDomainBtn" class="shrink-0 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-bold hover:bg-slate-100">Add <span id="excludeSpinner" class="hidden ml-2 inline-block align-middle h-4 w-4 rounded-full border-2 border-slate-400/60 border-t-slate-900 animate-spin"></span></button>
+              </div>
+              <datalist id="domainOptions"></datalist>
+              <div class="mt-2 flex flex-wrap gap-2" id="excludedDomainChips"></div>
+              <div class="mt-2 flex gap-2">
+                <button id="clearExcludedDomainsBtn" class="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-bold hover:bg-slate-100">Clear all</button>
+              </div>
+              <div class="mt-2 text-[11px] text-slate-500 font-semibold">
+                Normalization converts URLs to <span class="font-mono">https://host</span>. Excluded domains are left untouched. Use <span class="font-mono">*.example.com</span> to exclude all subdomains.
+              </div>
+            </div>
+
+            <label class="flex items-center gap-2 text-sm font-semibold text-slate-700">
+              <input id="optIncludeNonLogin" type="checkbox" class="rounded border-slate-300" />
+              Include non-login items
+            </label>
+          </div>
+        </div>
+
+      </div>
+    </details>
+  </div>
+
+
+
+<div class="mt-2 grid grid-cols-1 sm:grid-cols-5 gap-2 text-xs font-extrabold">
+        <div class="rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-slate-700">1) Load</div>
+        <div class="rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-slate-700">2) Choose rules</div>
+        <div class="rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-slate-700">3) GO</div>
+        <div class="rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-slate-700">4) Review</div>
+        <div class="rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-slate-700">5) Download</div>
+      </div>
+      <div class="mt-2 text-[11px] font-semibold text-slate-500">
+        Nothing is deleted from Bitwarden. This tool only edits your JSON export locally in the browser.
+      </div>
+    </div>
+
+
+    </div>
+
+        <div class="mt-1 text-xs font-semibold text-slate-500">Build: 2026-02-08 22:40:34 • v4.12</div>
+      </div>
+      <div class="text-xs text-slate-500 font-semibold">Local-only HTML. Nothing is uploaded anywhere.</div>
+    </div>
+
+    <div id="statusMsg" class="hidden mt-3 p-3 rounded-lg border text-sm font-semibold"></div>
+
+    
+    <div class="mt-4 space-y-4">
+      <!-- file-card moved -->
+        </div>
+
+        <div class="mt-4 grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+          <div class="md:col-span-7">
+            <label class="text-xs font-bold text-slate-700">Search</label>
+            <input id="searchInput" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+                   placeholder="Search name, username, URI, notes… (domain searches like x.com are exact)" />
+          </div>
+          <div class="md:col-span-5 flex gap-3">
+            <button id="clearFilesBtn" class="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-bold hover:bg-slate-50 shrink-0">Clear files</button>
+            <button id="reloadLastBtn" class="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-bold hover:bg-slate-50">Reload last export</button>
+          </div>
+        </div>
+
+        
+      </div>
+
+      <div class="grid grid-cols-1 lg:[grid-template-columns:1fr_420px] gap-4 items-start">
+        <!-- Options moved to full width --></div>
+
+</div></div>
+</div>
+
+
+<div class="w-full rounded-2xl border border-slate-300 bg-white p-4 shadow-lg ring-1 ring-slate-200 lg:sticky lg:top-4">
+  <div class="border border-slate-200 rounded-xl overflow-hidden">
+    <div class="bg-slate-100 px-3 py-2 text-sm font-extrabold text-slate-800 flex justify-between items-center">
+      <span>Domains</span>
+      <span class="text-xs text-slate-500 font-semibold">Domains: <span id="domainCount">0</span></span>
+    </div>
+    <div class="p-3 bg-white">
+      <label class="text-xs font-bold text-slate-700">Sort</label>
+      <select id="domainSort" class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
+        <option value="recent" selected>Most recent first</option>
+        <option value="count">Most items first</option>
+        <option value="alpha">A → Z</option>
+      </select>
+      <div id="domainLegend" class="mt-2 flex flex-wrap gap-2 text-[11px] font-semibold text-slate-600"><span class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-1">Total</span><span class="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-2 py-1 text-rose-700">Selected for delete</span></div>
+      <div class="mt-2 text-[11px] text-slate-500 font-semibold">
+        Click a domain to filter the item list. (Click again to clear.)
+      </div>
+    </div>
+    <div id="domainList" class="bg-white max-h-[70vh] overflow-auto border-t p-2 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2"></div>
+  </div>
+</div>
+
+
+<div class="w-full rounded-2xl border border-slate-300 bg-white p-4 shadow-lg ring-1 ring-slate-200 lg:sticky lg:top-4">
+<div class="border border-slate-200 rounded-xl overflow-hidden">
+              <div class="bg-slate-100 px-3 py-2 text-sm font-extrabold text-slate-800 flex justify-between items-center">
+                <span>Items</span>
+                <span class="text-xs text-slate-500 font-semibold" id="itemsHeaderHint"></span>
+              </div>
+
+              <div class="mt-3 sticky top-2 z-10 rounded-xl border border-slate-200 bg-white/95 backdrop-blur p-3 shadow-sm">
+                <div class="flex flex-wrap items-center gap-3">
+                  <div class="text-xs font-extrabold text-slate-700">Search in:</div>
+                  <label class="flex items-center gap-1 text-xs font-bold text-slate-700"><input type="checkbox" id="scopeName" checked> Name</label>
+                  <label class="flex items-center gap-1 text-xs font-bold text-slate-700"><input type="checkbox" id="scopeUser" checked> Username</label>
+                  <label class="flex items-center gap-1 text-xs font-bold text-slate-700"><input type="checkbox" id="scopeHost" checked> URI host</label>
+                  <label class="flex items-center gap-1 text-xs font-bold text-slate-700"><input type="checkbox" id="scopeNotes"> Notes</label>
+                  <div class="mx-2 h-5 w-px bg-slate-200"></div>
+                  <label class="flex items-center gap-2 text-xs font-extrabold text-slate-800">
+              Review:
+              <select id="reviewMode" class="rounded-md border border-slate-300 px-2 py-1 text-xs font-bold">
+                <option value="all" selected>All items</option>
+                <option value="selected">Selected (marked)</option>
+                <option value="unselected">Unselected only</option>
+                <option value="manual">Manual-only</option>
+              </select>
+            </label>
+                  <label class="flex items-center gap-1 text-xs font-extrabold text-slate-800"><input type="checkbox" id="filterIncludeNonLogin"> Include non‑login</label>
+                  <div class="mx-2 h-5 w-px bg-slate-200"></div>
+                  <label class="flex items-center gap-1 text-xs font-bold text-slate-700">Sort:
+                    <select id="sortMode" class="ml-1 rounded-md border border-slate-300 px-2 py-1 text-xs font-bold">
+                      <option value="recent">Most recent first</option>
+                      <option value="domain">Domain A→Z</option>
+                      <option value="name">Name A→Z</option>
+                      <option value="selected">Selected first</option>
+                    </select>
+                  </label>
+                  <button id="resetRuleMarksBtn" class="ml-auto rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-extrabold hover:bg-slate-100">
+                    Reset rule selections
+                  </button>
+                  <button id="undoGoBtn" class="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-extrabold hover:bg-slate-100">
+                    Undo last GO
+                  </button>
+                </div>
+                <div class="mt-2 text-[11px] font-semibold text-slate-500">
+                  Matches are highlighted inside each entry. Use Review mode to browse marked vs unmarked items.
+                </div>
+              </div>
+
+
+              <div id="itemsList" class="max-h-[520px] overflow-auto divide-y"></div>
+            </div>
+        
+
+          
+          <div class="mt-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div class="text-xs font-extrabold text-slate-700">File stats</div>
+            <div id="stats" class="mt-2 text-xs font-bold text-slate-700"></div>
+          </div>
+
+<!-- Actions moved here (from right column) -->
+<div class="mt-4 pt-4 border-t">
+          
+          <div class="mt-3 text-xs text-slate-600 font-semibold">
+            Nothing is deleted until you download an export. Downloaded JSON has marked items removed. Backup buttons download only the items marked for deletion.
+          </div>
+
+          <div class="pt-2 text-[11px] font-semibold text-slate-500">
+                Tip: If you add an exclude, anything under that domain is unselected (and protected). If you turn off Preview exact deletions, those preview checks are cleared.
+              </div>
+            </div>
+          </div>
+<div class="flex flex-wrap gap-3 items-center">
+            <button id="goBtn" class="rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 text-sm font-extrabold shrink-0">
+              GO (apply rules) <span id="goSpinner" class="hidden ml-2 inline-block align-middle h-4 w-4 rounded-full border-2 border-white/50 border-t-white animate-spin"></span>
+            </button>
+            <button id="superSafeExactBtn" class="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-black text-emerald-800 hover:bg-emerald-100">
+              Super‑safe: mark exact dupes only
+            </button>
+
+            <button id="clearMarksBtn" class="rounded-lg border border-slate-300 hover:bg-slate-50 px-3 py-1.5 text-xs font-bold shrink-0">
+              Clear marks
+            </button>
+            <div id="diffSummary" class="mb-3 rounded-xl border border-slate-200 bg-white p-3 text-xs font-extrabold text-slate-800">Run GO to compute a deletion plan.</div>
+            <button id="download1Btn" class="rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 text-xs font-extrabold shrink-0">
+              Download File 1 (deletions applied)
+            </button>
+            <button id="download2Btn" class="rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 text-xs font-extrabold shrink-0">
+              Download File 2 (deletions applied)
+            </button>
+            <button id="downloadMergedBtn" class="rounded-lg bg-slate-900 hover:bg-black text-white px-3 py-1.5 text-xs font-extrabold sm:col-span-2 shrink-0">
+              Download MERGED (deletions applied)
+            </button>
+          
+            <button id="backup1Btn" class="rounded-lg bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 text-xs font-extrabold shrink-0">
+              Backup Deleted (File 1)
+            </button>
+            <button id="backup2Btn" class="rounded-lg bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 text-xs font-extrabold shrink-0">
+              Backup Deleted (File 2)
+            </button>
+            <button id="backupMergedBtn" class="rounded-lg bg-amber-900 hover:bg-amber-950 text-white px-3 py-1.5 text-xs font-extrabold sm:col-span-2 shrink-0">
+              Backup Deleted (MERGED)
+            </button>
+</div>
+
+
+<!-- moved: delete stats to bottom -->
+          </div>
+
+        </div>
+
+        
+
+        <div id="busyIndicator" class="hidden mt-4">
+          <div class="flex items-center gap-3 text-xs font-bold text-slate-700">
+            <svg class="animate-spin h-5 w-5 text-slate-700" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+            </svg>
+            <span id="busyText">Working…</span>
+          </div>
+        </div>
+      
+        
+</div>
+    
+</div>
+
+<div class="bg-white rounded-xl shadow-sm p-4 lg:sticky lg:top-4">
+  <div class="text-xs font-extrabold text-slate-700">Actions & stats</div>
+  </div>
+</div>
+      </div>
+    </div>
+
+  </div>
+
+<script>
+(() => {
+  const PING_SUFFIXES = ["pingidentity.com","pingone.com"];
+
+  function safeStr(v){ return (v===null||v===undefined) ? "" : String(v); }
+  
+  function getSearchScopes(){
+    return {
+      name: document.getElementById("scopeName")?.checked ?? true,
+      user: document.getElementById("scopeUser")?.checked ?? true,
+      host: document.getElementById("scopeHost")?.checked ?? true,
+      notes: document.getElementById("scopeNotes")?.checked ?? false,
+    };
+  }
+
+  function getItemSearchableFields(it){
+    return {
+      name: (it.name||"").toString(),
+      username: (it.login?.username||"").toString(),
+      notes: (it.notes||"").toString(),
+      host: (getPrimaryDomain(it)||"").toString(),
+    };
+  }
+
+  function searchFieldsMatch(it, q){
+    if(!q) return {ok:true, hits:[]};
+    const scope = getSearchScopes();
+    const f = getItemSearchableFields(it);
+    const qq = q.toLowerCase();
+    const hits = [];
+    if(scope.name && f.name.toLowerCase().includes(qq)) hits.push("name");
+    if(scope.user && f.username.toLowerCase().includes(qq)) hits.push("username");
+    if(scope.host && f.host.toLowerCase().includes(qq)) hits.push("host");
+    if(scope.notes && f.notes.toLowerCase().includes(qq)) hits.push("notes");
+    return {ok:hits.length>0, hits};
+  }
+
+  function highlightText(text, q){
+    if(!q) return escapeHtml(text);
+    const safe = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const reQ = new RegExp(safe, "ig");
+    return escapeHtml(text).replace(reQ, m=>`<mark class="rounded bg-yellow-200 px-1 font-black text-slate-900">${m}</mark>`);
+  }
+
+  // Busy overlay helpers (gives user feedback for heavier operations)
+  function setBusy(isBusy, msg){
+    const ov = document.getElementById("busyOverlay");
+    const bt = document.getElementById("busyText");
+    if(bt && msg) bt.textContent = msg;
+    if(ov){
+      if(isBusy) ov.classList.remove("hidden");
+      else ov.classList.add("hidden");
+    }
+  }
+  async function runWithBusy(msg, fn){
+    try{
+      setBusy(true, msg || "Working…");
+      // let the browser paint the overlay before heavy work
+      await new Promise(r => requestAnimationFrame(()=>requestAnimationFrame(r)));
+      return await fn();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+function escapeHtml(s){ return safeStr(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+  
+  let lastDeletedSnapshot = null;
+  let lastRuleMarksSnapshot = null;
+  let appliedAt = null;
+
+  function setAppliedState(){
+    const st = document.getElementById("appliedState");
+    const when = document.getElementById("appliedWhen");
+    const cnt = document.getElementById("appliedCount");
+    if(!st) return;
+    if(appliedAt){
+      st.classList.remove("hidden");
+      if(when) when.textContent = appliedAt;
+      if(cnt) cnt.textContent = String(deleted.size);
+    }else{
+      st.classList.add("hidden");
+    }
+  }
+
+  function updateDiffSummary(){
+    const el = document.getElementById("diffSummary");
+    if(!el) return;
+    if(!hasAppliedGo){
+      el.textContent = "Run GO to compute a deletion plan.";
+      return;
+    }
+    const d1 = data1 ? (data1.items||[]).filter(it=>deleted.has(itemKey(1,it.id))).length : 0;
+    const d2 = data2 ? (data2.items||[]).filter(it=>deleted.has(itemKey(2,it.id))).length : 0;
+    const parts = [];
+    if(data1) parts.push(`Will remove ${d1} item(s) from File 1`);
+    if(data2) parts.push(`Will remove ${d2} item(s) from File 2`);
+    el.textContent = parts.join(" • ") || `Marked: ${deleted.size}`;
+  }
+
+  function updateDownloadEnabled(){
+    const btns = ["download1Btn","download2Btn","downloadMergedBtn","downloadDeletedBackupBtn"].map(id=>document.getElementById(id)).filter(Boolean);
+    const enabled = deleted.size>0;
+    btns.forEach(b=>{
+      b.disabled = !enabled;
+      b.classList.toggle("opacity-50", !enabled);
+      b.classList.toggle("cursor-not-allowed", !enabled);
+      b.title = enabled ? "" : "No items marked. Run GO or select items to enable downloads.";
+    });
+  }
+function setStatus(message, type="info", timeoutMs=2500){
+    const el = document.getElementById("statusMsg");
+    if(!el) return;
+    el.classList.remove("hidden");
+    el.classList.remove("bg-emerald-50","border-emerald-200","text-emerald-900","bg-amber-50","border-amber-200","text-amber-900","bg-red-50","border-red-200","text-red-900","bg-slate-50","border-slate-200","text-slate-900");
+    if(type==="success") el.classList.add("bg-emerald-50","border-emerald-200","text-emerald-900");
+    else if(type==="warning") el.classList.add("bg-amber-50","border-amber-200","text-amber-900");
+    else if(type==="error") el.classList.add("bg-red-50","border-red-200","text-red-900");
+    else el.classList.add("bg-slate-50","border-slate-200","text-slate-900");
+    el.textContent = message;
+    if(timeoutMs>0){
+      clearTimeout(window.__statusTimer);
+      window.__statusTimer=setTimeout(()=>{ el.classList.add("hidden"); el.textContent=""; }, timeoutMs);
+    }
+  }
+  function showBusy(msg="Working…"){
+    const el=document.getElementById("busyIndicator");
+    const t=document.getElementById("busyText");
+    if(t) t.textContent=msg;
+    if(el) el.classList.remove("hidden");
+  }
+  function hideBusy(){
+    const el=document.getElementById("busyIndicator");
+    if(el) el.classList.add("hidden");
+  }
+  function runWithSpinner(fn,msg="Working…"){
+    showBusy(msg);
+    setTimeout(()=>{ try{ fn(); } finally { requestAnimationFrame(()=>hideBusy()); } }, 0);
+  }
+
+
+  // ---- Merge helper: folders ----
+  function randomId(){
+    try{ if(crypto && crypto.randomUUID) return crypto.randomUUID(); }catch(e){}
+    return "m_" + Math.random().toString(16).slice(2) + Date.now().toString(16);
+  }
+
+  function folderIdToNameMap(data){
+    const m = new Map();
+    (data?.folders||[]).forEach(f=>{
+      if(f && f.id && f.name) m.set(String(f.id), String(f.name));
+    });
+    return m;
+  }
+
+  function ensureMergedFoldersAndRemapItems(baseData, otherData){
+    // Merge folders by (case-insensitive) name.
+    const folders1 = (baseData?.folders||[]).map(f=>JSON.parse(JSON.stringify(f)));
+    const idToName1 = folderIdToNameMap(baseData);
+    const nameToId = new Map();
+    folders1.forEach(f=>{ if(f?.name && f?.id) nameToId.set(String(f.name).toLowerCase(), String(f.id)); });
+
+    const remapOther = new Map();
+    const foldersOut = folders1;
+
+    (otherData?.folders||[]).forEach(f=>{
+      if(!f?.id || !f?.name) return;
+      const nameKey = String(f.name).toLowerCase();
+      if(nameToId.has(nameKey)){
+        remapOther.set(String(f.id), nameToId.get(nameKey));
+      } else {
+        let newId = String(f.id);
+        if(idToName1.has(newId)) newId = randomId();
+        const nf = JSON.parse(JSON.stringify(f));
+        nf.id = newId;
+        foldersOut.push(nf);
+        nameToId.set(nameKey, newId);
+        remapOther.set(String(f.id), newId);
+      }
+    });
+
+    return { folders: foldersOut, remapOther };
+  }
+
+  function remapFolderIdsOnItems(items, remap){
+    if(!remap || !items) return;
+    items.forEach(it=>{
+      if(it?.folderId && remap.has(String(it.folderId))){
+        it.folderId = remap.get(String(it.folderId));
+      }
+    });
+  }
+  function isLoginItem(it){ return (it && (it.type===1 || it.type==="login") && it.login); }
+  function itemKey(src,id){ return `${src}:${id}`; }
+  function fmtDate(s){ if(!s) return ""; const d=new Date(s); if(isNaN(d.getTime())) return ""; return d.toISOString().slice(0,10); }
+  function itemTime(it){
+    const r=it?.revisionDate ? new Date(it.revisionDate).getTime() : NaN;
+    const c=it?.creationDate ? new Date(it.creationDate).getTime() : NaN;
+    if(!isNaN(r)) return r;
+    if(!isNaN(c)) return c;
+    return 0;
+  }
+
+  function isNullOrEmptyPassword(pw){
+    return pw === null || pw === undefined || (typeof pw === "string" && pw.trim() === "");
+  }
+
+  function computeNullPasswordSubcounts(){
+    const items = combinedItems().filter(isLoginItem);
+    let total = 0, safer = 0, review = 0;
+
+    const userHasRealPw = new Map();
+    for(const it of items){
+      const u = safeStr(it?.login?.username).trim().toLowerCase();
+      if(!u) continue;
+      if(!isNullOrEmptyPassword(it?.login?.password)){
+        userHasRealPw.set(u, true);
+      }
+    }
+
+    for(const it of items){
+      if(!isNullOrEmptyPassword(it?.login?.password)) continue;
+      total++;
+      const u = safeStr(it?.login?.username).trim().toLowerCase();
+      if(u && userHasRealPw.get(u)) safer++;
+      else review++;
+    }
+    return { total, safer, review };
+  }
+
+  function updateNullPasswordHelperCounts(){
+    const np = computeNullPasswordSubcounts();
+    document.querySelectorAll(".npTotal").forEach(el=>el.textContent=String(np.total));
+    document.querySelectorAll(".npSafer").forEach(el=>el.textContent=String(np.safer));
+    document.querySelectorAll(".npReview").forEach(el=>el.textContent=String(np.review));
+  }
+
+  
+  function getFirstUri(item){
+    try{
+      if(!item) return "";
+      const login = item.login || (item.data ? item.data.login : null);
+      const uris = (login && Array.isArray(login.uris)) ? login.uris : (Array.isArray(item.uris) ? item.uris : []);
+      if(!Array.isArray(uris) || uris.length===0) return "";
+      const u = uris[0];
+      if(typeof u === "string") return u;
+      if(u && typeof u.uri === "string") return u.uri;
+      return "";
+    } catch(e){ return ""; }
+  }
+
+function extractDomain(uri){
+    try{
+      const u = new URL(uri.includes("://") ? uri : ("https://"+uri));
+      return (u.hostname||"").toLowerCase();
+    }catch(e){ return ""; }
+  }
+  function looksLikeDomainQuery(q){
+    if(!q) return false;
+    if(q.includes(" ")||q.includes("@")) return false;
+    return q.includes(".") && /[a-z]/i.test(q);
+  }
+  function getHostnames(it){
+    const out=[];
+    const uris = it?.login?.uris || [];
+    for(const u of uris){
+      const s=safeStr(u?.uri).trim();
+      if(!s) continue;
+      const d=extractDomain(s);
+      if(d) out.push(d);
+    }
+    return out;
+  }
+  function searchHaystack(it){
+    const parts=[safeStr(it.name), safeStr(it.notes)];
+    if(isLoginItem(it)){
+      parts.push(safeStr(it.login.username));
+      for(const u of (it.login.uris||[])) parts.push(safeStr(u.uri));
+    }
+    return parts.join(" ").toLowerCase();
+  }
+  function matchesSearch(it,q){
+    const qq=safeStr(q).trim().toLowerCase();
+    if(!qq) return true;
+    if(looksLikeDomainQuery(qq)){
+      const hs=getHostnames(it).map(x=>x.toLowerCase());
+      return hs.some(h => h===qq || h.endsWith("."+qq));
+    }
+    return searchHaystack(it).includes(qq);
+  }
+  function highlight(text,q){
+    const s=safeStr(text);
+    const qq=safeStr(q).trim();
+    if(!qq) return escapeHtml(s);
+    const ql=qq.toLowerCase();
+    const sl=s.toLowerCase();
+    if(looksLikeDomainQuery(ql)){
+      const re = new RegExp(`(^|[^a-z0-9])(${ql.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')})(?=[^a-z0-9]|$)`, "ig");
+      return escapeHtml(s).replace(re,(m,p1,p2)=> `${p1}<mark class="bg-yellow-200 px-0.5 rounded">${p2}</mark>`);
+    }
+    const idx=sl.indexOf(ql);
+    if(idx===-1) return escapeHtml(s);
+    return escapeHtml(s.slice(0,idx)) + `<mark class="bg-yellow-200 px-0.5 rounded">${escapeHtml(s.slice(idx,idx+qq.length))}</mark>` + escapeHtml(s.slice(idx+qq.length));
+  }
+
+  function isPingDomain(host){
+    if(!host) return false;
+    return PING_SUFFIXES.some(sfx => host===sfx || host.endsWith("."+sfx));
+  }
+  function normalizeUriToHost(uri){
+    const raw=safeStr(uri).trim();
+    if(!raw) return "";
+    try{
+      const u = new URL(raw.includes("://") ? raw : ("https://"+raw));
+      const host=u.hostname.toLowerCase();
+      if(isPingDomain(host)) return raw;
+      return `https://${host}`;
+    }catch(e){ return raw; }
+  }
+
+  function bigrams(s){
+    const t=safeStr(s).toLowerCase().replace(/\s+/g," ").trim();
+    const out=[];
+    for(let i=0;i<t.length-1;i++) out.push(t.slice(i,i+2));
+    return out;
+  }
+  function dice(a,b){
+    if(!a||!b) return 0;
+    const A=bigrams(a), B=bigrams(b);
+    if(!A.length||!B.length) return 0;
+    const map=new Map();
+    for(const x of A) map.set(x,(map.get(x)||0)+1);
+    let inter=0;
+    for(const x of B){
+      const n=map.get(x)||0;
+      if(n>0){ inter++; map.set(x,n-1); }
+    }
+    return (2*inter)/(A.length+B.length);
+  }
+  function fuzzyParts(a,b){
+    const sName=dice(a?.name,b?.name);
+    const ua=safeStr(a?.login?.username), ub=safeStr(b?.login?.username);
+    const sUser=(ua&&ub) ? dice(ua,ub) : 0;
+    const da=new Set(getHostnames(a)), db=new Set(getHostnames(b));
+    let overlap=0; da.forEach(d=>{ if(db.has(d)) overlap++; });
+    const denom=Math.max(da.size, db.size) || 1;
+    const sDom=(da.size && db.size) ? overlap/denom : 0;
+    const score=0.70*sName + 0.25*sUser + 0.05*sDom;
+    return {score,sName,sUser,sDom,overlap,denom};
+  }
+
+  let data1=null, data2=null;
+  let originalFileName="", secondFileName="";
+  let selectedDomain="";
+  let hasAppliedGo=false; // true after GO computes marks;
+  const deleted = new Set();
+  // Track deletion mutations so we can avoid re-rendering heavy tables on scroll.
+  let deletedTick = 0;
+  function delAdd(k){ delAdd(k); deletedTick++; }
+  function delDel(k){ delDel(k); deletedTick++; }
+  function delClear(){ delClear(); deletedTick++; }
+
+  const manualKeep = new Set();
+  
+    
+  const exactPreviewMarks = new Set();
+  const superSafeExactMarks = new Set();
+
+  const ruleMarks = {
+    autoExact: new Set(),
+    nullDupes: new Set(),
+    nullAll: new Set(),
+    blankCreds: new Set(),
+    fuzzy: new Set(),
+  };
+  function clearRuleMarks(){ Object.values(ruleMarks).forEach(s=>s.clear()); hasAppliedGo=false; }
+const excludedDomains = new Set();
+
+
+  function isExcludedDomain(host){
+    if(!host) return false;
+    const h = String(host).toLowerCase();
+    if(excludedDomains.has(h)) return true;
+    for(const pat of excludedDomains){
+      if(typeof pat !== "string") continue;
+      const p = pat.toLowerCase().trim();
+      if(p.startsWith("*.") && p.length > 2){
+        const root = p.slice(2);
+        if(h === root) return true;
+        if(h.endsWith("." + root)) return true;
+      }
+    }
+    return false;
+  }
+
+  function itemMatchesExcluded(item){
+    if(!item) return false;
+    if(!isLoginItem(item)) return false;
+    const hosts = getHostnames(item);
+    for(const h of hosts){
+      if(isExcludedDomain(h)) return true;
+    }
+    return false;
+  }
+
+  function applyExcludedDomainsToDeletions(){
+    const items = combinedItems();
+    let removed = 0;
+    let protectedCount = 0;
+    for(const it of items){
+      if(!it) continue;
+      if(!itemMatchesExcluded(it)) continue;
+      const key = itemKey(it.__src, it.id);
+      if(deleted.has(key)){
+        delDel(key);
+        removed++;
+      }
+      if(!manualKeep.has(key)){
+        manualKeep.add(key);
+        protectedCount++;
+      }
+      try{
+        if(lastRuleMarks){
+          Object.values(lastRuleMarks).forEach(s=>{ try{ s.delete && s.delete(key); }catch(e){} });
+        }
+      }catch(e){}
+    }
+    if(removed>0 || protectedCount>0){
+      updateSelectionSummary();
+    setStatus(`Excluded domains: unmarked ${removed} deletion(s), protected ${protectedCount} item(s).`, "info", 2600);
+    }
+  }
+// Track which rule(s) marked each deletion key (for readable stats)
+  let lastRuleMarks = {
+    exact: new Set(),
+    nullPwDupes: new Set(),
+    allNullPw: new Set(),
+    blankUP: new Set(),
+    fuzzy: new Set(),
+    manual: new Set()
+  }
+window.__normalizeOnExport=false;
+
+  function parseJsonText(txt){
+    const obj=JSON.parse(txt);
+    if(!obj || !Array.isArray(obj.items)) throw new Error("Missing items[]");
+    return obj;
+  }
+  function loadFile(file, which){
+    const r=new FileReader();
+    r.onload=()=>{
+      try{
+        const obj=parseJsonText(r.result);
+        if(which===1){ data1=obj; originalFileName=file.name; }
+        else { data2=obj; secondFileName=file.name; }
+        setStatus(`Loaded ${which===1?"File 1":"File 2"}: ${file.name}`, "success", 2200);
+        updateExcludedDomainsUI();
+        applyExcludedDomainsToDeletions();
+        refreshAll();
+      }catch(e){
+        console.error(e);
+        setStatus(`Error parsing JSON: ${e.message}`, "error", 6000);
+      }
+    };
+    r.readAsText(file);
+  }
+
+  function combinedItems(){
+    const items=[];
+    if(data1?.items) for(const it of data1.items) items.push({__src:1, ...it});
+    if(data2?.items) for(const it of data2.items) items.push({__src:2, ...it});
+    return items;
+  }
+  function getDomainForItem(it){
+    if(isLoginItem(it)){
+      const hs=getHostnames(it);
+      if(hs.length) return hs[0];
+    }
+    return "(no domain)";
+  }
+
+  function getPasswordKey(it){
+    if(!isLoginItem(it)) return "";
+    const u=safeStr(it.login.username).trim().toLowerCase();
+    const p=(it.login.password===null || it.login.password===undefined) ? "__NULL__" : safeStr(it.login.password);
+    return `${u}|||${p}`;
+  }
+
+  function computeExactDupes(){
+    const items=combinedItems().filter(isLoginItem);
+    const groups=new Map();
+    for(const it of items){
+      const key=getPasswordKey(it);
+      if(!key) continue;
+      if(!groups.has(key)) groups.set(key,[]);
+      groups.get(key).push(it);
+    }
+    const toDelete=[];
+    const allDupeKeys=new Set();
+    let sets=0, count=0;
+    for(const arr of groups.values()){
+      if(arr.length<2) continue;
+      sets++; count+=arr.length;
+      const sorted=[...arr].sort((a,b)=>itemTime(b)-itemTime(a));
+      sorted.forEach(it=>allDupeKeys.add(itemKey(it.__src,it.id)));
+      sorted.slice(1).forEach(it=>toDelete.push(itemKey(it.__src,it.id)));
+    }
+    return {toDelete, sets, items:count, allDupeKeys:[...allDupeKeys]};
+  }
+
+  
+  function clearExactPreviewMarks(){
+    let removed = 0;
+    for(const k of Array.from(exactPreviewMarks)){
+      if(deleted.has(k)){
+        delDel(k);
+        removed++;
+      }
+    }
+    exactPreviewMarks.clear();
+    if(removed>0){
+      setStatus(`Cleared ${removed} previewed exact-dupe deletion(s).`, "info", 2200);
+    }
+  }
+
+function previewExactDeletesIfNeeded(){
+    const preview = document.getElementById("optPreviewExact")?.checked;
+    if(!preview) return;
+
+    const ex = computeExactDupes();
+    let added = 0;
+    ex.toDelete.forEach(k=>{
+      if(manualKeep.has(k)) return;
+      if(!deleted.has(k)){
+        delAdd(k);
+        exactPreviewMarks.add(k);
+        added++;
+      }
+    });
+    if(added>0){
+      setStatus(`Preview: checked ${added} oldest exact dupe(s) for deletion.`, "info", 2400);
+    }
+  }
+
+  function computeNullPwDupes(){
+    const items=combinedItems().filter(isLoginItem);
+    const byUser=new Map();
+    for(const it of items){
+      const u=safeStr(it.login.username).trim().toLowerCase();
+      if(!u) continue;
+      if(!byUser.has(u)) byUser.set(u,[]);
+      byUser.get(u).push(it);
+    }
+    const out=new Set();
+    byUser.forEach(arr=>{
+      if(arr.length<2) return;
+      const hasNonNull=arr.some(it=> it.login.password!==null && it.login.password!==undefined && safeStr(it.login.password).trim()!=="");
+      if(!hasNonNull) return;
+      arr.forEach(it=>{
+        const p=it.login.password;
+        const blank=(p===null||p===undefined||safeStr(p).trim()==="");
+        if(blank) out.add(itemKey(it.__src,it.id));
+      });
+    });
+    return [...out];
+  }
+  function computeAllNullPw(){
+    return combinedItems().filter(isLoginItem).filter(it=>{
+      const p=it.login.password;
+      return (p===null||p===undefined||safeStr(p).trim()==="");
+    }).map(it=>itemKey(it.__src,it.id));
+  }
+  function computeBlankUP(){
+    return combinedItems().filter(isLoginItem).filter(it=>{
+      const u=safeStr(it.login.username).trim();
+      const p=safeStr(it.login.password).trim();
+      return (!u && !p);
+    }).map(it=>itemKey(it.__src,it.id));
+  }
+
+  function applyRules(){
+    clearRuleMarks();
+    const markDeleteKey = (k, bucket)=>{
+      if(!k) return;
+      if(manualKeep.has(k)) return;
+      delAdd(k);
+      if(bucket && ruleMarks[bucket]) ruleMarks[bucket].add(k);
+    };
+    const autoExact=(document.getElementById("optAutoExact")?.checked || false);
+    const nullDupes=(document.getElementById("optNullPwDupes")?.checked || false);
+    const allNull=(document.getElementById("optAllNullPw")?.checked || false);
+    const blankUP=(document.getElementById("optBlankUP")?.checked || false);
+    const normalize=(document.getElementById("optNormalizeUris")?.checked || false);
+
+    const prevKeep=[...manualKeep];
+
+    delClear();
+    manualKeep.clear();
+    prevKeep.forEach(k=>manualKeep.add(k));
+
+    lastRuleMarks = {
+      exact: new Set(),
+      nullPwDupes: new Set(),
+      allNullPw: new Set(),
+      blankUP: new Set(),
+      manual: new Set()
+    };
+
+    if(autoExact){
+      const ex = computeExactDupes();
+      ex.toDelete.forEach(k=>{
+      markDeleteKey(k,"autoExact"); lastRuleMarks.exact.add(k); });
+    }
+    if(nullDupes){
+      computeNullPwDupes().forEach(k=>{ delAdd(k); lastRuleMarks.nullPwDupes.add(k); });
+    }
+    if(allNull){
+      computeAllNullPw().forEach(k=>{ delAdd(k); lastRuleMarks.allNullPw.add(k); });
+    }
+    if(blankUP){
+      computeBlankUP().forEach(k=>{ delAdd(k); lastRuleMarks.blankUP.add(k); });
+    }
+
+    // Manual keep overrides
+    manualKeep.forEach(k=>{ delDel(k); lastRuleMarks.manual.add(k); });
+
+    window.__normalizeOnExport=!!normalize;
+
+    setStatus(`GO applied. Marked ${deleted.size} item(s) for deletion.`, "success", 2600);
+    refreshAll();
+      hasAppliedGo = true;
+}
+
+  function computeDomains(){
+    const q=(document.getElementById("searchInput")?.value || "");
+    const reviewMode = document.getElementById("reviewMode") ? ((document.getElementById("reviewMode")?.value || "") || "all") : "all";
+    const includeNonLogin=(document.getElementById("optIncludeNonLogin")?.checked || false);
+    const onlyExact=(document.getElementById("optShowExactOnly")?.checked || false);
+    const exactKeys = onlyExact ? new Set(computeExactDupes().allDupeKeys) : null;
+
+    const map=new Map();
+    for(const it of combinedItems()){
+      if(!includeNonLogin && !isLoginItem(it)) continue;
+      if(q && !matchesSearch(it,q)) continue;
+      if(onlyExact){
+        if(!isLoginItem(it)) continue;
+        if(!exactKeys.has(itemKey(it.__src,it.id))) continue;
+      }
+      const d=getDomainForItem(it);
+      if(!map.has(d)) map.set(d,{items:[], newest:0});
+      const e=map.get(d);
+      e.items.push(it);
+      e.newest=Math.max(e.newest, itemTime(it));
+    }
+
+    const list=[...map.entries()].map(([domain,info])=>{
+      let del=0;
+      for(const it of info.items){
+        const k=itemKey(it.__src,it.id);
+        if(deleted.has(k)) del++;
+      }
+      return {domain,count:info.items.length,del,newest:info.newest,items:info.items};
+    });
+    const sort=(document.getElementById("domainSort")?.value || "");
+    if(sort==="alpha") list.sort((a,b)=>a.domain.localeCompare(b.domain));
+    else if(sort==="count") list.sort((a,b)=>b.count-a.count || b.newest-a.newest);
+    else list.sort((a,b)=>b.newest-a.newest || b.count-a.count);
+    
+    const mode = document.querySelector('input[name="domainFilter"]:checked')?.value || 'all';
+    const filtered = list.filter(d=>{
+      if(mode==='hasDel') return d.del>0;
+      if(mode==='noDel') return d.del===0;
+      return true;
+    });
+    const mini = document.getElementById('domainSummaryMini');
+    if(mini){
+      const tot = filtered.reduce((s,d)=>s+d.count,0);
+      const del = filtered.reduce((s,d)=>s+d.del,0);
+      mini.textContent = `${filtered.length} domains • ${tot} items • ${del} marked`;
+    }
+    return filtered;
+
+  }
+
+  
+    let _lastSelectedRenderTick = -1;
+  let _lastSelectedRenderCount = -1;
+  function renderSelectedTable(items){
+    const tbody = document.getElementById("selectedItemsTbody");
+    const counts = document.getElementById("selectedCounts");
+    if(!tbody || !counts) return;
+    const selected = (items||[]).filter(it=>deleted.has(itemKey(it.__src,it.id)));
+    counts.textContent = `Marked: ${selected.length}`;
+    // Avoid heavy DOM work if nothing changed (prevents blanking while scrolling)
+    if(_lastSelectedRenderTick === deletedTick && _lastSelectedRenderCount === selected.length){ return; }
+    _lastSelectedRenderTick = deletedTick; _lastSelectedRenderCount = selected.length;
+    // Render up to 500 rows to keep UI snappy
+    const maxRows = 500;
+        const rows = selected.slice(0,maxRows).map(it=>{
+      const domain = escapeHtml(it.__domain || "");
+      const name = escapeHtml(it.name || "");
+      const user = escapeHtml(it.login?.username || "");
+      const pw = escapeHtml(it.login?.password || "");
+      const folder = escapeHtml(it.__folderName || "(no folder)");
+      const vault = escapeHtml(it.__vaultLabel || "");
+      const why = escapeHtml(it.__why || "");
+      return `<tr class="hover:bg-slate-50">
+        <td class="px-3 py-1.5 font-bold text-slate-800">${domain}</td>
+        <td class="px-3 py-1.5">${name}</td>
+        <td class="px-3 py-1.5 font-mono text-xs">${user}</td>
+        <td class="px-3 py-1.5 font-mono text-xs">${pw}</td>
+        <td class="px-3 py-1.5">${folder}</td>
+        <td class="px-3 py-1.5">${vault}</td>
+        <td class="px-3 py-1.5 text-xs text-slate-600">${why}</td>
+      </tr>`;
+    });
+    tbody.innerHTML = rows.join("");
+    if(selected.length > maxRows){
+      tbody.insertAdjacentHTML("beforeend", `<tr><td colspan="7" class="px-3 py-1.5 text-xs font-bold text-slate-600">Showing first ${maxRows} marked items.</td></tr>`);
+    }
+  }
+
+function render(){
+    const f1n=document.getElementById("originalFileName");
+    if(f1n) f1n.textContent = data1 ? `Loaded: ${originalFileName}` : "Not loaded";
+    const f2n=document.getElementById("secondFileName");
+    if(f2n) f2n.textContent = data2 ? `Loaded: ${secondFileName}` : "Not loaded";
+
+    const items1=(data1?.items||[]);
+    const items2=(data2?.items||[]);
+    const del1=items1.filter(it=>deleted.has(itemKey(1,it.id))).length;
+    const del2=items2.filter(it=>deleted.has(itemKey(2,it.id))).length;
+
+    const ex=computeExactDupes();
+    const n1=escapeHtml(originalFileName||"File 1");
+    const n2=escapeHtml(secondFileName||"File 2");
+    const statsEl = document.getElementById("stats");
+    if(statsEl) statsEl.innerHTML = `
+      <div>File 1: ${n1} • ${items1.length} items • Marked: ${del1}</div>
+      <div>File 2: ${data2 ? (n2 + ` • ${items2.length} items • Marked: ${del2}`) : "not loaded"}</div>
+      <div class="mt-2 text-xs text-slate-500 font-semibold">Exact dupes: ${ex.sets} sets / ${ex.items} items</div>
+    `;
+
+    const domains=computeDomains();
+    const _dc=document.getElementById("domainCount"); if(_dc) _dc.textContent=String(domains.length);
+
+    const dl=document.getElementById("domainList");
+    dl.innerHTML="";
+    if(!domains.length){
+      dl.innerHTML=`<div class="px-3 py-3 text-sm text-slate-500 font-semibold">Load a file to begin.</div>`;
+    } else {
+      if(!selectedDomain || !domains.some(d=>d.domain===selectedDomain)) selectedDomain=domains[0].domain;
+      for(const d of domains){
+        const btn=document.createElement("button");
+        btn.className="text-left px-3 py-1.5 text-base font-semibold hover:bg-slate-50 flex items-center justify-between " + (d.domain===selectedDomain ? "bg-indigo-50" : "");
+        btn.innerHTML=`<span class="truncate">${escapeHtml(d.domain)}</span><span class="ml-2 text-xs font-bold text-slate-600">${d.count}</span>`;
+        btn.addEventListener("click",()=>{ selectedDomain=d.domain; render(); });
+        dl.appendChild(btn);
+      }
+    }
+
+    const q=(document.getElementById("searchInput")?.value || "");
+    const reviewMode = document.getElementById("reviewMode") ? ((document.getElementById("reviewMode")?.value || "") || "all") : "all";
+    const includeNonLogin=(document.getElementById("optIncludeNonLogin")?.checked || false);
+    const onlyExact=(document.getElementById("optShowExactOnly")?.checked || false);
+    const showPw = true; // always show passwords
+    const fuzzy=(document.getElementById("optFuzzy")?.checked || false);
+    const thr=parseFloat((document.getElementById("optFuzzyThreshold")?.value || "") || "0.88");
+    const exactKeys = onlyExact ? new Set(computeExactDupes().allDupeKeys) : null;
+
+    const items=combinedItems().filter(it=>{
+      if(!includeNonLogin && !isLoginItem(it)) return false;
+      if(selectedDomain && getDomainForItem(it)!==selectedDomain) return false;
+      if(q && !matchesSearch(it,q)) return false;
+      // Review mode filters (manual review workflow)
+      const k = itemKey(it.__src,it.id);
+
+    // Always render the selected-for-deletion table from the full combined item list
+    renderSelectedTable(combinedItems());
+      if(reviewMode==="selected" && !deleted.has(k)) return false;
+      if(reviewMode==="unselected" && deleted.has(k)) return false;
+      if(reviewMode==="manual"){
+        if(!deleted.has(k)) return false;
+        const byRule = (lastRuleMarks?.exact?.has(k) || lastRuleMarks?.nullPwDupes?.has(k) || lastRuleMarks?.allNullPw?.has(k) || lastRuleMarks?.blankUP?.has(k) || lastRuleMarks?.fuzzy?.has(k) || superSafeExactMarks?.has(k));
+        if(byRule) return false;
+      }
+      if(onlyExact){
+        if(!isLoginItem(it)) return false;
+        return exactKeys.has(itemKey(it.__src,it.id));
+      }
+      return true;
+    });
+    const _ih=document.getElementById("itemsHeaderHint"); if(_ih) _ih.textContent=`${items.length} item(s) • Review: ${reviewMode}`;
+
+    const il=document.getElementById("itemsList");
+    il.innerHTML="";
+
+    if(fuzzy && items.length>1){
+      const pairs=[];
+      for(let i=0;i<items.length;i++){
+        for(let j=i+1;j<items.length;j++){
+          const a=items[i], b=items[j];
+          if(!isLoginItem(a)||!isLoginItem(b)) continue;
+          const p=fuzzyParts(a,b);
+          if(p.score>=thr){
+          const aTime=itemTime(a), bTime=itemTime(b);
+          const del = (aTime<=bTime) ? a : b;
+          const keep = (del===a) ? b : a;
+          const deleteKey=itemKey(del.__src, del.id);
+          const reason = `older ${fmtDate(del.revisionDate||del.creationDate)||"no date"} vs ${fmtDate(keep.revisionDate||keep.creationDate)||"no date"}`;
+          pairs.push({a,b,...p, suggest:{deleteKey, deleteName:(del.name||"(no name)"), reason}});
+        }
+        }
+      }
+      pairs.sort((x,y)=>y.score-x.score);
+      const top=pairs.slice(0,25);
+      const wrap=document.createElement("div");
+      wrap.className="px-3 py-3 bg-slate-50 border-b";
+      if(top.length){
+        wrap.innerHTML = `
+          <div class="text-xs font-extrabold text-slate-700">Fuzzy matches (top ${top.length})</div>
+          <div class="mt-2 overflow-x-auto">
+            <table class="min-w-full text-xs border border-slate-200 bg-white rounded-lg overflow-hidden">
+              <thead class="bg-slate-100">
+                <tr>
+                  <th class="text-left px-2 py-1 border-b">Score</th>
+                  <th class="text-left px-2 py-1 border-b">Name</th>
+                  <th class="text-left px-2 py-1 border-b">User</th>
+                  <th class="text-left px-2 py-1 border-b">Dom</th>
+                  <th class="text-left px-2 py-1 border-b">A</th>
+                  <th class="text-left px-2 py-1 border-b">B</th>
+                  <th class="text-left px-2 py-1 border-b">Suggested delete</th>
+                  <th class="text-left px-2 py-1 border-b">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${top.map(p=>`
+                  <tr class="border-b align-top">
+                    <td class="px-2 py-1 font-bold">${p.score.toFixed(2)}</td>
+                    <td class="px-2 py-1">${p.sName.toFixed(2)}</td>
+                    <td class="px-2 py-1">${p.sUser.toFixed(2)}</td>
+                    <td class="px-2 py-1">${p.sDom.toFixed(2)}</td>
+                    <td class="px-2 py-1">
+                      <div class="font-bold">${escapeHtml(p.a.name||"(no name)")}</div>
+                      <div class="text-slate-600 font-semibold">${escapeHtml((p.a.login && p.a.login.username!=null && String(p.a.login.username).trim()!=="") ? String(p.a.login.username) : "(blank)")}</div>
+                    </td>
+                    <td class="px-2 py-1">
+                      <div class="font-bold">${escapeHtml(p.b.name||"(no name)")}</div>
+                      <div class="text-slate-600 font-semibold">${escapeHtml((p.b.login && p.b.login.username!=null && String(p.b.login.username).trim()!=="") ? String(p.b.login.username) : "(blank)")}</div>
+                    </td>
+                    <td class="px-2 py-1">
+                      <div class="font-bold text-red-800">${escapeHtml(p.suggest.deleteName)}</div>
+                      <div class="text-slate-600 font-semibold">${escapeHtml(p.suggest.reason)}</div>
+                      <div class="text-[11px] font-semibold text-slate-500 mt-1">
+                        ${deleted.has(p.suggest.deleteKey) ? "Already marked" : ""}
+                      </div>
+                    </td>
+                    <td class="px-2 py-1">
+                      <button data-fuzzy-del="${p.suggest.deleteKey}" class="text-[11px] font-extrabold px-2 py-1 rounded bg-red-100 text-red-800 hover:bg-red-200">Mark delete</button>
+                      <button data-fuzzy-keep="${p.suggest.deleteKey}" class="ml-2 text-[11px] font-extrabold px-2 py-1 rounded bg-emerald-100 text-emerald-800 hover:bg-emerald-200">Keep</button>
+                    </td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          </div>
+        `;
+      } else {
+        wrap.innerHTML = `<div class="text-xs font-semibold text-slate-600">Fuzzy enabled: no matches above threshold ${thr.toFixed(2)}.</div>`;
+      }
+      il.appendChild(wrap);
+    }
+
+    if(!items.length){
+      il.innerHTML=`<div class="px-3 py-3 text-sm text-slate-500 font-semibold">No items match this filter.</div>`;
+    } else {
+      for(const it of items){
+        const k=itemKey(it.__src,it.id);
+        const marked=deleted.has(k);
+        const keep=manualKeep.has(k);
+        const host=getDomainForItem(it);
+        const title=it.name||"(no name)";
+        const user=isLoginItem(it) ? (it.login.username||"") : "";
+        const pw=isLoginItem(it) ? (it.login.password ?? "") : "";
+        const pwDisplay=showPw ? safeStr(pw) : (pw ? "••••••••" : "");
+        const uri0=isLoginItem(it) ? (it.login.uris?.[0]?.uri || "") : "";
+        const date=fmtDate(it.revisionDate || it.creationDate);
+
+        const row=document.createElement("div");
+        row.className="px-3 py-3";
+        row.innerHTML = `
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <div class="text-base font-extrabold text-slate-800 truncate">${highlight(title,q)}</div>
+              <div class="mt-1 text-sm font-semibold text-slate-600 flex flex-wrap gap-2">
+                <span class="px-2 py-0.5 rounded-full bg-slate-100">Vault: ${it.__src===1 ? escapeHtml(originalFileName||"File 1") : escapeHtml(secondFileName||"File 2")}</span>
+                <span class="px-2 py-0.5 rounded-full bg-slate-100">Date: ${escapeHtml(date||"")}</span>
+                <span class="px-2 py-0.5 rounded-full bg-slate-100">Domain: ${escapeHtml(host)}</span>
+                ${marked ? `<span class="px-2 py-0.5 rounded-full bg-red-100 text-red-800">Marked delete</span>` : ``}
+                ${keep ? `<span class="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">Manual keep</span>` : ``}
+              </div>
+              ${isLoginItem(it) ? `
+              <div class="mt-2 grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div class="text-sm font-semibold text-slate-700">Username:
+                  <span class="font-mono">${highlight(user,q)}</span>
+                  <button data-copy="${escapeHtml(user)}" class="ml-2 text-[11px] font-bold px-2 py-0.5 rounded bg-slate-200 hover:bg-slate-300">Copy</button>
+                </div>
+                <div class="text-sm font-semibold text-slate-700">Password:
+                  <span class="font-mono">${escapeHtml(pwDisplay)}</span>
+                  <button data-copy="${escapeHtml(safeStr(pw))}" class="ml-2 text-[11px] font-bold px-2 py-0.5 rounded bg-slate-200 hover:bg-slate-300">Copy</button>
+                </div>
+                <div class="md:col-span-2 text-sm font-semibold text-slate-700 truncate">
+                  URL: <span class="font-mono">${highlight(uri0,q)}</span>
+                  ${uri0 ? `<button data-open="${escapeHtml(uri0)}" class="ml-2 text-[11px] font-bold px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 hover:bg-indigo-200">Open</button>` : ``}
+                </div>
+              </div>` : `
+              <div class="mt-2 text-sm font-semibold text-slate-600">Non-login item (type: ${escapeHtml(it.type)})</div>
+              `}
+            </div>
+
+            <div class="flex flex-col items-end gap-2">
+              <label class="flex items-center gap-2 text-xs font-bold text-slate-700">
+                <input data-mark="${k}" type="checkbox" class="rounded border-slate-300" ${marked ? "checked":""} />
+                Delete
+              </label>
+              <button data-keep="${k}" class="text-xs font-bold px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50">
+                ${keep ? "Unkeep" : "Keep"}
+              </button>
+            </div>
+          </div>
+        `;
+        il.appendChild(row);
+      }
+    }
+
+    il.querySelectorAll("input[data-mark]").forEach(cb=>{
+      cb.addEventListener("change",(e)=>{
+        const key=e.target.getAttribute("data-mark");
+        if(e.target.checked) { delAdd(key); lastRuleMarks.fuzzy.add(key); } else { delDel(key); lastRuleMarks.manual.delete(key); }
+        manualKeep.delete(key);
+        setStatus(`Marked for deletion: ${deleted.size}`, "info", 1200);
+        render();
+      });
+    });
+    il.querySelectorAll("button[data-keep]").forEach(b=>{
+      b.addEventListener("click",(e)=>{
+        const key=e.target.getAttribute("data-keep");
+        if(manualKeep.has(key)) manualKeep.delete(key); else manualKeep.add(key);
+        delDel(key);
+        setStatus(`Manual keep set. Marked for deletion: ${deleted.size}`, "info", 1500);
+        render();
+      });
+    });
+    il.querySelectorAll("button[data-copy]").forEach(b=>{
+      b.addEventListener("click", async (e)=>{
+        const val=e.target.getAttribute("data-copy") || "";
+        try{ await navigator.clipboard.writeText(val); setStatus("Copied.", "success", 900); }
+        catch{ setStatus("Copy failed (clipboard blocked).", "warning", 2000); }
+      });
+    });
+    il.querySelectorAll("button[data-open]").forEach(b=>{
+      b.addEventListener("click",(e)=>{
+        const raw=e.target.getAttribute("data-open") || "";
+        const u=normalizeUriToHost(raw);
+        window.open(u, "_blank", "noopener,noreferrer");
+      });
+    });
+
+    document.getElementById("download2Btn").disabled = !data2;
+    document.getElementById("download2Btn").classList.toggle("opacity-50", !data2);
+    document.getElementById("download2Btn").classList.toggle("cursor-not-allowed", !data2);
+
+    updateDeleteStats();
+    updateDiffSummary();
+    updateDownloadEnabled();
+        updateNullPasswordHelperCounts();
+updateSelectionSummary();
+      updateSelectionSummary();
+}
+
+  
+  function countDomainsForData(d){
+    if(!d?.items) return 0;
+    const set=new Set();
+    for(const it of d.items){
+      if(!isLoginItem(it)) continue;
+      const u=getFirstUri(it);
+      const h=hostFromUrl(u);
+      if(h) set.add(h);
+    }
+    return set.size;
+  }
+
+  function updateStats(){
+    const statsEl=document.getElementById("stats");
+    if(!statsEl) return;
+    const name1 = (originalFileName?.textContent && originalFileName.textContent!=="Not loaded") ? originalFileName.textContent.replace(/^File 1:\s*/,'') : (originalFileName || "File 1");
+    const name2 = (secondFileName?.textContent && secondFileName.textContent!=="Not loaded") ? secondFileName.textContent.replace(/^File 2:\s*/,'') : (secondFileName || "File 2");
+    const s1 = data1 ? {items:(data1.items||[]).length, domains:countDomainsForData(data1)} : {items:0, domains:0};
+    const s2 = data2 ? {items:(data2.items||[]).length, domains:countDomainsForData(data2)} : {items:0, domains:0};
+    const ex = data1 ? computeExactDupes() : {sets:0, items:0}; // computeExactDupes uses combinedItems; requires data1 at least
+    const del1 = data1 ? (data1.items||[]).filter(it=>deleted.has(itemKey(1,it.id))).length : 0;
+    const del2 = data2 ? (data2.items||[]).filter(it=>deleted.has(itemKey(2,it.id))).length : 0;
+
+    const line1 = `File 1: ${escapeHtml(name1)} • ${s1.domains} domains • ${s1.items} items • Marked for deletion: ${del1}`;
+    const line2 = data2 ? `File 2: ${escapeHtml(name2)} • ${s2.domains} domains • ${s2.items} items • Marked for deletion: ${del2}` : `File 2: not loaded`;
+    const line3 = data1 ? `Exact dupes (combined): ${ex.sets} sets / ${ex.items} items` : `Load File 1 to compute duplicates.`;
+    statsEl.innerHTML = `<div class="leading-6">${line1}</div><div class="leading-6">${line2}</div><div class="leading-6 text-slate-600">${line3}</div>`;
+  }
+
+
+function refreshAll(){
+    populateOrgUI();
+    setAppliedState(); render();
+    updateStats(); }
+
+  
+
+  function updateDeleteStats(){
+    const boxSummary = document.getElementById("deleteStatsSummary");
+    const boxBreak = document.getElementById("deleteStatsBreakdown");
+    if(!boxSummary || !boxBreak) return;
+
+    if(!data1){
+      boxSummary.textContent = "Load File 1 to see deletion stats.";
+      boxBreak.textContent = "";
+      return;
+    }
+
+    const total = deleted.size;
+    const file1Items = (data1?.items||[]);
+    const file2Items = (data2?.items||[]);
+
+    const del1 = file1Items.filter(it=>deleted.has(itemKey(1,it.id))).length;
+    const del2 = file2Items.filter(it=>deleted.has(itemKey(2,it.id))).length;
+
+    const np = computeNullPasswordSubcounts();
+    const autoAllNull = document.getElementById("optAllNullPw")?.checked;
+
+
+    if(total===0){
+      boxSummary.textContent = "No deletions marked yet. Use GO or check boxes, then download.";
+      boxBreak.innerHTML = `
+        <div class="mt-1 text-sm font-semibold text-slate-700">
+          • Null‑password items in vault: <span class="font-extrabold">${np.total}</span>
+          <span class="text-slate-500">(safer: ${np.safer} • review: ${np.review})</span>
+          ${autoAllNull ? `<span class="ml-2 text-red-700 font-extrabold">GO will delete ALL null‑password items</span>` : ``}
+        </div>
+      `;
+      return;
+    }
+
+    boxSummary.innerHTML = `<span class="font-extrabold">${total}</span> item(s) marked for deletion — <span class="font-extrabold">${del1}</span> in File 1${data2 ? `, <span class="font-extrabold">${del2}</span> in File 2` : ""}.`;
+
+    const cExact = lastRuleMarks.exact?.size || 0;
+    const cNullDupes = lastRuleMarks.nullPwDupes?.size || 0;
+    const cAllNull = lastRuleMarks.allNullPw?.size || 0;
+    const cBlank = lastRuleMarks.blankUP?.size || 0;
+    const cManual = [...(lastRuleMarks.manual||[])].filter(k=>deleted.has(k)).length;
+
+    boxBreak.innerHTML = `
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 mt-1">
+        <div>• Exact dupes (oldest): <span class="font-extrabold">${cExact}</span></div>
+        <div>• Null‑password dupes: <span class="font-extrabold">${cNullDupes}</span></div>
+        <div>• All null‑password items: <span class="font-extrabold">${cAllNull}</span></div>
+        <div class="sm:col-span-2 text-sm font-semibold text-slate-700">• Null‑password breakdown: <span class="font-extrabold">${np.total}</span> <span class="text-slate-500">(safer: ${np.safer} • review: ${np.review})</span> ${autoAllNull ? `<span class="ml-2 text-red-700 font-extrabold">GO deletes all null‑password</span>` : ``}</div>
+        <div>• Blank user+pass logins: <span class="font-extrabold">${cBlank}</span></div>
+        <div class="sm:col-span-2">• Manually marked: <span class="font-extrabold">${cManual}</span></div>
+      </div>
+      <div class="mt-2 text-[11px] text-slate-500 font-semibold">
+        Deletions are applied only in the downloaded JSON (export has marked items removed).
+      </div>
+    `;
+  }
+
+  function getCurrentFilteredItems(){
+    try{
+      if(typeof getDisplayData === "function"){
+        const dd = getDisplayData();
+        if(dd && Array.isArray(dd.items)) return dd.items;
+      }
+    }catch(e){}
+    return combinedItems();
+  }
+
+  function updateSelectionSummary(){
+    const total = deleted.size;
+    const items = getCurrentFilteredItems();
+    let visible = 0;
+    for(const it of items){
+      const k = itemKey(it.__src, it.id);
+      if(deleted.has(k)) visible++;
+    }
+    const $ = (id)=>document.getElementById(id);
+    if($("selTotal")) $("selTotal").textContent = String(total);
+    if($("selVisible")) $("selVisible").textContent = String(visible);
+
+    const exactPrev = exactPreviewMarks.size;
+    const autoExact = ruleMarks.autoExact.size;
+    const nullDupes = ruleMarks.nullDupes.size;
+    const nullAll = ruleMarks.nullAll.size;
+    const blankCreds = ruleMarks.blankCreds.size;
+    const fuzzy = (lastRuleMarks?.fuzzy ? lastRuleMarks.fuzzy.size : 0);
+    const counted = exactPrev + autoExact + nullDupes + nullAll + blankCreds + fuzzy;
+    const manual = Math.max(0, total - counted);
+
+    if($("selExactPreview")) $("selExactPreview").textContent = String(exactPrev);
+    if($("selAutoExact")) $("selAutoExact").textContent = String(autoExact);
+    if($("selNullDupes")) $("selNullDupes").textContent = String(nullDupes);
+    if($("selNullAll")) $("selNullAll").textContent = String(nullAll);
+    if($("selBlankCreds")) $("selBlankCreds").textContent = String(blankCreds);
+    if($("selFuzzy")) $("selFuzzy").textContent = String(fuzzy);
+    if($("selManual")) $("selManual").textContent = String(manual);
+  }
+
+
+
+  // Bitwarden import constraint:
+  // If an item has organizationId but NO collectionIds, Bitwarden import can fail with "File contains unassigned items".
+  // We keep org metadata when collections are present; otherwise we strip org assignment for that item (making it personal).
+  
+  function detectOrgData(exportObj){
+    const orgs = new Map(); // orgId -> {orgId, collections:[{id,name}]}
+    try{
+      const cols = exportObj?.collections || [];
+      cols.forEach(c=>{
+        const oid = c.organizationId;
+        if(!oid) return;
+        if(!orgs.has(oid)) orgs.set(oid, {orgId: String(oid), collections: []});
+        orgs.get(oid).collections.push({id:String(c.id), name:(c.name||"Collection")});
+      });
+      // If no collections present, try to infer org ids from items
+      if(orgs.size===0){
+        (exportObj?.items||[]).forEach(it=>{
+          if(it?.organizationId){
+            const oid=String(it.organizationId);
+            if(!orgs.has(oid)) orgs.set(oid,{orgId:oid, collections:[]});
+          }
+        });
+      }
+    }catch(e){}
+    return orgs;
+  }
+
+  function populateOrgUI(){
+    const chk = document.getElementById("optForceOrgAll");
+    const orgSel = document.getElementById("orgSelect");
+    const colSel = document.getElementById("collectionSelect");
+    if(!orgSel || !colSel) return;
+
+    // Prefer file1’s orgs; if none, use file2
+    const orgs1 = data1 ? detectOrgData(data1) : new Map();
+    const orgs2 = data2 ? detectOrgData(data2) : new Map();
+    const orgs = orgs1.size ? orgs1 : orgs2;
+
+    orgSel.innerHTML = "";
+    colSel.innerHTML = "";
+
+    if(orgs.size===0){
+      orgSel.innerHTML = `<option value="">(no organization found in export)</option>`;
+      colSel.innerHTML = `<option value="">(no collections found)</option>`;
+      if(chk) chk.checked = false;
+      if(chk) chk.disabled = true;
+      return;
+    }else{
+      if(chk) chk.disabled = false;
+    }
+
+    for(const [oid, info] of orgs.entries()){
+      orgSel.insertAdjacentHTML("beforeend", `<option value="${escapeHtml(oid)}">${escapeHtml(oid)}</option>`);
+    }
+
+    function refreshCollections(){
+      const oid = orgSel.value;
+      const info = orgs.get(oid);
+      colSel.innerHTML = "";
+      if(info && info.collections && info.collections.length){
+        info.collections
+          .slice()
+          .sort((a,b)=>(a.name||"").localeCompare(b.name||""))
+          .forEach(c=>{
+            colSel.insertAdjacentHTML("beforeend", `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name||c.id)}</option>`);
+          });
+      }else{
+        colSel.insertAdjacentHTML("beforeend", `<option value="">(no collections found for this org)</option>`);
+      }
+      colSel.insertAdjacentHTML("beforeend", `<option value="__new__">Create new collection…</option>`);
+    }
+    refreshCollections();
+    orgSel.addEventListener("change", refreshCollections);
+  }
+
+  function forceAllItemsToOrg(exportObj){
+    const chk = document.getElementById("optForceOrgAll");
+    if(!chk || !chk.checked) return exportObj;
+
+    const orgSel = document.getElementById("orgSelect");
+    const colSel = document.getElementById("collectionSelect");
+    const newNameInput = document.getElementById("newCollectionName");
+
+    const oid = orgSel?.value;
+    let targetCol = colSel?.value;
+
+    if(!oid){
+      setStatus("Org import is enabled, but no Organization is selected.", "warn", 3500);
+      return exportObj;
+    }
+
+    // Ensure collections array exists
+    exportObj.collections = exportObj.collections || [];
+
+    // Create a new collection if requested
+    if(targetCol === "__new__"){
+      const name = (newNameInput?.value || "Imported — Review").trim();
+      const newId = crypto?.randomUUID ? crypto.randomUUID() : String(Date.now()) + "-" + Math.random().toString(16).slice(2);
+      exportObj.collections.push({
+        id: newId,
+        organizationId: oid,
+        name: name
+      });
+      targetCol = newId;
+    }
+
+    if(!targetCol){
+      setStatus("Org import is enabled, but no Collection is selected/available.", "warn", 3500);
+      return exportObj;
+    }
+
+    // Apply to every item
+    (exportObj.items || []).forEach(it=>{
+      if(!it) return;
+      it.organizationId = oid;
+      it.collectionIds = [targetCol];
+    });
+
+    setStatus("Applied Organization import: all items assigned to the selected org + collection (in exported JSON).", "info", 3000);
+    return exportObj;
+  }
+
+function sanitizeUnassignedOrgItems(exportObj){
+    try{
+      const knownCollections = new Set((exportObj.collections||[]).map(c=>String(c.id)));
+      (exportObj.items||[]).forEach(it=>{
+        if(!it) return;
+        const org = it.organizationId;
+        const cids = it.collectionIds;
+        const hasCollections = Array.isArray(cids) && cids.length>0;
+        if(org && !hasCollections){
+          it.organizationId = null;
+          try{ delete it.organizationId; } catch(e){}
+          try{ delete it.collectionIds; } catch(e){}
+        } else if(org && hasCollections){
+          // Drop invalid collection ids if they don't exist (safer)
+          it.collectionIds = cids.map(x=>String(x)).filter(x=>knownCollections.has(String(x)));
+          if(it.collectionIds.length===0){
+            it.organizationId = null;
+            try{ delete it.organizationId; } catch(e){}
+            try{ delete it.collectionIds; } catch(e){}
+          }
+        }
+      });
+    }catch(e){}
+    return exportObj;
+  }
+
+function applyDeletionsAndNormalize(data, src){
+    if(!data) return null;
+    const normalize = !!window.__normalizeOnExport;
+    const copy = JSON.parse(JSON.stringify(data));
+    copy.items = (copy.items||[]).filter(it => !deleted.has(itemKey(src,it.id)));
+    if(normalize){
+      copy.items.forEach(it=>{
+        if(!isLoginItem(it)) return;
+        (it.login.uris||[]).forEach(u=>{
+          const s=safeStr(u.uri);
+          const host=extractDomain(s);
+          if(isPingDomain(host)) return;
+          if(isExcludedDomain(host)) return;
+          if(excludedDomains.has(host)) return;
+          const n=normalizeUriToHost(s);
+          if(n && n!==s) u.uri=n;
+        });
+      });
+    }
+    forceAllItemsToOrg(copy);
+    sanitizeUnassignedOrgItems(copy);
+    return copy;
+  }
+
+  // Build a Bitwarden-importable backup JSON containing ONLY deleted items.
+  // This does NOT normalize URIs (it is a snapshot of what you're deleting).
+  function buildDeletedBackup(data, src){
+    if(!data) return null;
+    const copy = JSON.parse(JSON.stringify(data));
+    copy.items = (copy.items||[]).filter(it => deleted.has(itemKey(src,it.id)));
+    return copy;
+  }
+
+  function mergedDeletedBackup(){
+    if(!data1) return null;
+
+    const base = JSON.parse(JSON.stringify(data1));
+    const fm = ensureMergedFoldersAndRemapItems(base, data2);
+    base.folders = fm.folders;
+
+    const outItems = [];
+    const b1 = buildDeletedBackup(data1, 1);
+    if(b1?.items) outItems.push(...b1.items);
+
+    const b2 = data2 ? buildDeletedBackup(data2, 2) : null;
+    if(b2?.items){
+      remapFolderIdsOnItems(b2.items, fm.remapOther);
+      outItems.push(...b2.items);
+    }
+
+    base.items = outItems;
+
+    const known = new Set((base.folders||[]).map(f=>String(f.id)));
+    (base.items||[]).forEach(it=>{
+      if(it?.folderId && !known.has(String(it.folderId))) it.folderId = null;
+    });
+
+    return base;
+  }
+
+  function downloadJson(obj, filename){
+    const blob=new Blob([JSON.stringify(obj,null,2)], {type:"application/json"});
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(blob);
+    a.download=filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 0);
+  }
+
+  function collectAllDomains(){
+    const set = new Set();
+    for(const it of combinedItems()){
+      if(!isLoginItem(it)) continue;
+      for(const h of getHostnames(it)){
+        if(h) set.add(h.toLowerCase());
+      }
+    }
+    return [...set].sort((a,b)=>a.localeCompare(b));
+  }
+
+  function updateDomainOptionsDatalist(){
+    const dl = document.getElementById("domainOptions");
+    if(!dl) return;
+    dl.innerHTML = "";
+    const domains = collectAllDomains();
+    for(const d of domains){
+      const opt = document.createElement("option");
+      opt.value = d;
+      dl.appendChild(opt);
+    }
+  }
+
+  function renderExcludedDomainChips(){
+    const wrap = document.getElementById("excludedDomainChips");
+    if(!wrap) return;
+    wrap.innerHTML = "";
+    const arr = [...excludedDomains].sort((a,b)=>a.localeCompare(b));
+    if(!arr.length){
+      wrap.innerHTML = '<span class="text-[11px] text-slate-500 font-semibold">None</span>';
+      return;
+    }
+    for(const d of arr){
+      const chip = document.createElement("div");
+      chip.className = "flex items-center gap-2 px-2 py-1 rounded-full bg-slate-200 text-slate-800 text-xs font-bold";
+      chip.innerHTML = `<span class="font-mono">${escapeHtml(d)}</span><button class="text-slate-700 hover:text-black" aria-label="Remove">✕</button>`;
+      chip.querySelector("button").addEventListener("click", ()=>{
+        excludedDomains.delete(d);
+        setStatus(`Removed exclude: ${d}. Re-run GO if you want rules reapplied.`, "info", 1800);
+        renderExcludedDomainChips();
+        runWithSpinner(()=>{ refreshAll(); }, "Updating view…", "Refreshing lists.", "excludeSpinner");
+});
+      wrap.appendChild(chip);
+    }
+  }
+
+  function updateExcludedDomainsUI(){
+    updateDomainOptionsDatalist();
+    renderExcludedDomainChips();
+  }
+
+  function mergedExport(){
+    if(!data1) return null;
+
+    const base = JSON.parse(JSON.stringify(data1));
+    const fm = ensureMergedFoldersAndRemapItems(base, data2);
+    base.folders = fm.folders;
+
+    const outItems = [];
+    const a1 = applyDeletionsAndNormalize(data1, 1);
+    if(a1?.items) outItems.push(...a1.items);
+
+    const a2 = data2 ? applyDeletionsAndNormalize(data2, 2) : null;
+    if(a2?.items){
+      remapFolderIdsOnItems(a2.items, fm.remapOther);
+      outItems.push(...a2.items);
+    }
+
+    base.items = outItems;
+
+    // Safety: clear any folderId that doesn't exist in base.folders
+    const known = new Set((base.folders||[]).map(f=>String(f.id)));
+    (base.items||[]).forEach(it=>{
+      if(it?.folderId && !known.has(String(it.folderId))) it.folderId = null;
+    });
+
+    forceAllItemsToOrg(base);
+    sanitizeUnassignedOrgItems(base);
+    return base;
+  }
+  function saveLast(kind,obj){ try{ localStorage.setItem("bw_last_"+kind, JSON.stringify(obj)); } catch(e){} }
+  function loadLast(kind){ try{ const s=localStorage.getItem("bw_last_"+kind); return s ? JSON.parse(s) : null; } catch(e){ return null; } }
+
+  document.getElementById("fileInput1").addEventListener("change",(e)=>{ const f=e.target.files?.[0]; if(f) loadFile(f,1); });
+  document.getElementById("fileInput2").addEventListener("change",(e)=>{ const f=e.target.files?.[0]; if(f) loadFile(f,2); });
+
+  ["optShowPw","optShowExactOnly","optPreviewExact","optAutoExact","optFuzzy","optFuzzyThreshold","optNullPwDupes","optAllNullPw","optBlankUP","optNormalizeUris","optIncludeNonLogin","domainSort"].forEach(id=>{
+    const el=document.getElementById(id);
+    if(!el) return;
+    el.addEventListener("change", ()=>{ setStatus("Options updated. Click GO to apply rules.", "info", 1800);
+      runWithSpinner(()=>{
+        if(!document.getElementById("optPreviewExact")?.checked){ clearExactPreviewMarks(); }
+        applyRules();
+        refreshAll();
+        previewExactDeletesIfNeeded();
+      }, "Updating view…", "Refreshing lists for your filters/options.");
+      });
+  });
+  document.getElementById("searchInput").addEventListener("input", ()=>refreshAll());
+
+  
+
+  document.getElementById("markFuzzyDeletesBtn").addEventListener("click", ()=>{
+    runWithSpinner(()=>{
+if(!data1){ setStatus("Load File 1 first.", "warning", 2200); return; }
+    const thr=parseFloat(document.getElementById("optFuzzyThreshold").value || "0.88");
+
+  function clearFuzzySelections(){
+    if(!lastRuleMarks?.fuzzy){ setStatus("No fuzzy selections tracked yet.", "info", 1800); return; }
+    let removed = 0;
+    for(const k of Array.from(lastRuleMarks.fuzzy)){
+      if(deleted.has(k)){
+        delDel(k);
+        removed++;
+      }
+    }
+    lastRuleMarks.fuzzy.clear();
+    if(removed){
+      setStatus(`Cleared ${removed} fuzzy-selected deletion(s).`, "info", 2200);
+    }else{
+      setStatus("No fuzzy-selected deletions to clear.", "info", 1800);
+    }
+    refreshAll();
+  }
+
+  const clearFuzzyBtn = document.getElementById("clearFuzzyDeletesBtn");
+  if(clearFuzzyBtn){
+    clearFuzzyBtn.addEventListener("click", ()=>{
+      runWithSpinner(()=>{ clearFuzzySelections(); }, "Clearing fuzzy selections…", "Unmarking fuzzy delete selections.", "fuzzySpinner");
+    });
+  }
+
+    const items=combinedItems().filter(isLoginItem);
+    let marked=0;
+    for(let i=0;i<items.length;i++){
+      for(let j=i+1;j<items.length;j++){
+        const a=items[i], b=items[j];
+        const p=fuzzyParts(a,b);
+        if(p.score>=thr){
+          const del=(itemTime(a)<=itemTime(b)) ? a : b;
+          const key=itemKey(del.__src, del.id);
+          if(!deleted.has(key)){
+            delAdd(key);
+            lastRuleMarks.fuzzy.add(key);
+            manualKeep.delete(key);
+            marked++;
+          }
+        }
+      }
+    }
+    setStatus(`Marked ${marked} suggested fuzzy delete(s). Review before downloading.`, marked ? "success" : "info", 3000);
+    refreshAll();
+  
+    }, "Computing fuzzy matches…", "Scanning for similar entries based on your threshold.", "fuzzySpinner");
+  });
+document.getElementById("goBtn").addEventListener("click", ()=>{
+    if(!data1){ setStatus("Load File 1 first.", "warning", 2200); return; }
+    runWithSpinner(()=>applyRules(), "Applying rules…");
+  });
+  document.getElementById("clearMarksBtn").addEventListener("click", ()=>{ delClear(); manualKeep.clear(); excludedDomains.clear(); window.__normalizeOnExport=false; setStatus("Cleared marks.", "info", 1400); refreshAll(); });
+
+  document.getElementById("download1Btn").addEventListener("click", ()=>{
+    if(!data1){ setStatus("Load File 1 first.", "warning", 2200); return; }
+    const updated=applyDeletionsAndNormalize(data1,1);
+    saveLast("file1", updated);
+    downloadJson(updated, (originalFileName||"file1") + "_deletions_applied.json");
+    setStatus("Downloaded File 1 export (deletions applied).", "success", 2200);
+  });
+  document.getElementById("download2Btn").addEventListener("click", ()=>{
+    if(!data2){ setStatus("Load File 2 first.", "warning", 2200); return; }
+    const updated=applyDeletionsAndNormalize(data2,2);
+    saveLast("file2", updated);
+    downloadJson(updated, (secondFileName||"file2") + "_deletions_applied.json");
+    setStatus("Downloaded File 2 export (deletions applied).", "success", 2200);
+  });
+  document.getElementById("downloadMergedBtn").addEventListener("click", ()=>{
+    if(!data1){ setStatus("Load File 1 first.", "warning", 2200); return; }
+    const merged=mergedExport();
+    saveLast("merged", merged);
+    downloadJson(merged, "bitwarden_merged_deletions_applied.json");
+    setStatus("Downloaded merged export (deletions applied).", "success", 2400);
+  });
+
+  
+
+  document.getElementById("backup1Btn").addEventListener("click", ()=>{
+    if(!data1){ setStatus("Load File 1 first.", "warning", 2200); return; }
+    const backup = buildDeletedBackup(data1, 1);
+    downloadJson(backup, (originalFileName||"file1") + "_DELETED_BACKUP.json");
+    setStatus("Downloaded deleted-items backup for File 1.", "success", 2400);
+  });
+
+  document.getElementById("backup2Btn").addEventListener("click", ()=>{
+    if(!data2){ setStatus("Load File 2 first.", "warning", 2200); return; }
+    const backup = buildDeletedBackup(data2, 2);
+    downloadJson(backup, (secondFileName||"file2") + "_DELETED_BACKUP.json");
+    setStatus("Downloaded deleted-items backup for File 2.", "success", 2400);
+  });
+
+  document.getElementById("backupMergedBtn").addEventListener("click", ()=>{
+    if(!data1){ setStatus("Load File 1 first.", "warning", 2200); return; }
+    const backup = mergedDeletedBackup();
+    downloadJson(backup, "bitwarden_DELETED_BACKUP_merged.json");
+    setStatus("Downloaded merged deleted-items backup.", "success", 2400);
+  });
+document.getElementById("clearFilesBtn").addEventListener("click", ()=>{
+    data1=null; data2=null; originalFileName=""; secondFileName=""; selectedDomain="";
+    delClear(); manualKeep.clear(); excludedDomains.clear(); window.__normalizeOnExport=false;
+    document.getElementById("fileInput1").value=""; document.getElementById("fileInput2").value="";
+    setStatus("Cleared loaded files.", "info", 1600);
+    updateExcludedDomainsUI();
+    refreshAll();
+  });
+  
+
+  // Exclude domains UI
+  const addBtn = document.getElementById("addExcludeDomainBtn");
+  const clearBtn = document.getElementById("clearExcludedDomainsBtn");
+  const excludeInput = document.getElementById("excludeDomainInput");
+
+  function addExcludedDomain(val){
+    let d = safeStr(val).trim().toLowerCase();
+    if(!d) return;
+
+    // Strip scheme/path if user pasted a URL
+    d = d.replace(/^https?:\/\//, "").split("/")[0];
+
+    // Allow wildcard prefix "*."
+    if(d.startsWith("*.") && d.length > 2){
+      const rest = d.slice(2).replace(/^\.+/,"");
+      if(!rest){ setStatus("Wildcard needs a domain after *.", "warning", 2200); return; }
+      d = "*." + rest;
+    } else {
+      d = d.replace(/^\.+/,"");
+    }
+
+    excludedDomains.add(d);
+    if(excludeInput) excludeInput.value = "";
+    renderExcludedDomainChips();
+    applyExcludedDomainsToDeletions();
+    refreshAll();
+    setStatus(`Excluded from normalization: ${d}`, "success", 1800);
+  }
+
+  if(addBtn){
+    addBtn.addEventListener("click", ()=>{
+      runWithSpinner(()=> addExcludedDomain(excludeInput?.value), "Applying exclude…", "Updating deletion marks and domain lists.", "excludeSpinner");
+    });
+  }
+  if(excludeInput){
+    excludeInput.addEventListener("keydown",(e)=>{
+      if(e.key==="Enter"){ e.preventDefault(); runWithSpinner(()=> addExcludedDomain(excludeInput.value), "Applying exclude…", "Updating deletion marks and domain lists.", "excludeSpinner"); }
+    });
+  }
+  if(clearBtn){
+    clearBtn.addEventListener("click", ()=>{
+      runWithSpinner(()=>{
+        excludedDomains.clear();
+        renderExcludedDomainChips();
+        refreshAll();
+      }, "Clearing excludes…", "Refreshing lists.", "excludeSpinner");
+      setStatus("Cleared excluded domains. Re-run GO if you want rules reapplied.", "info", 2200);
+    });
+  }
+document.getElementById("reloadLastBtn").addEventListener("click", ()=>{
+    const last=loadLast("file1");
+    if(!last){ setStatus("No saved last export found yet. Download once first.", "warning", 3000); return; }
+    data1=last; originalFileName="last_export_file1.json";
+    setStatus("Reloaded last exported JSON into File 1.", "success", 2200);
+    refreshAll();
+  });
+
+  updateExcludedDomainsUI();
+  applyExcludedDomainsToDeletions();
+  refreshAll();
+
+  function openSuperSafeModal(){
+    const modal = document.getElementById("superSafeModal");
+    const input = document.getElementById("superSafeConfirmInput");
+    const countEl = document.getElementById("superSafeCount");
+    if(!modal) return;
+    const ex = computeExactDupes();
+    const n = ex?.toDelete ? ex.toDelete.size : 0;
+    if(countEl) countEl.textContent = String(n);
+    if(input) input.value = "";
+    modal.classList.remove("hidden");
+    modal.classList.add("flex");
+    setStatus(`Super-safe preview: ${n} exact dupe(s) would be marked.`, "info", 2400);
+  }
+
+  function closeSuperSafeModal(){
+    const modal = document.getElementById("superSafeModal");
+    if(!modal) return;
+    modal.classList.add("hidden");
+    modal.classList.remove("flex");
+  }
+
+  function applySuperSafeExactMarks(){
+    const ex = computeExactDupes();
+    let added = 0;
+    const toDel = ex?.toDelete ? Array.from(ex.toDelete) : [];
+    for(const k of toDel){
+      if(manualKeep.has(k)) continue;
+      if(!deleted.has(k)){
+        delAdd(k);
+        superSafeExactMarks.add(k);
+        added++;
+      }else{
+        // If already selected, still attribute to super-safe for clearing later
+        superSafeExactMarks.add(k);
+      }
+    }
+    if(added>0){
+      setStatus(`Super-safe: marked ${added} exact dupe(s) (oldest in each set).`, "success", 2600);
+    }else{
+      setStatus("Super-safe: no new exact dupes to mark.", "info", 2000);
+    }
+    refreshAll();
+  }
+
+  function clearSuperSafeExactMarks(){
+    let removed = 0;
+    for(const k of Array.from(superSafeExactMarks)){
+      if(deleted.has(k)){
+        delDel(k);
+        removed++;
+      }
+    }
+    superSafeExactMarks.clear();
+    if(removed>0) setStatus(`Super-safe: cleared ${removed} marked item(s).`, "info", 2200);
+    refreshAll();
+  }
+
+  // Super-safe UI wiring
+  const superBtn = document.getElementById("superSafeExactBtn");
+  if(superBtn){
+    superBtn.addEventListener("click", ()=>{
+      runWithSpinner(()=>{ openSuperSafeModal(); }, "Preparing super-safe selection…", "Computing exact duplicates.", "goSpinner");
+    });
+  }
+  const superCancel = document.getElementById("superSafeCancelBtn");
+  if(superCancel) superCancel.addEventListener("click", ()=>closeSuperSafeModal());
+  const superApply = document.getElementById("superSafeApplyBtn");
+  if(superApply){
+    superApply.addEventListener("click", ()=>{
+      const v = (document.getElementById("superSafeConfirmInput")?.value || "").trim();
+      if(v !== "DELETE"){
+        setStatus('Type "DELETE" to confirm super-safe marking.', "warn", 2200);
+        return;
+      }
+      runWithSpinner(()=>{ applySuperSafeExactMarks(); closeSuperSafeModal(); }, "Marking exact dupes…", "Applying super-safe rule.", "goSpinner");
+    });
+  }
+
+  function applySafetyMode(mode){
+    const set=(id,v)=>{ const el=document.getElementById(id); if(el) el.checked=v; };
+    if(mode==="safe"){
+      set("optAutoExact", true);
+      set("optNullPwDupes", false);
+      set("optAllNullPw", false);
+      set("optBlankUP", false);
+      set("optFuzzyEnabled", false);
+    }else if(mode==="standard"){
+      set("optAutoExact", true);
+      set("optNullPwDupes", true);
+      set("optAllNullPw", false);
+      set("optBlankUP", true);
+      set("optFuzzyEnabled", false);
+    }else{
+      set("optAutoExact", true);
+      set("optNullPwDupes", true);
+      set("optAllNullPw", true);
+      set("optBlankUP", true);
+      set("optFuzzyEnabled", true);
+    }
+    setStatus(`Safety mode set: ${mode}.`, "info", 1800);
+  }
+  document.querySelectorAll('input[name="safetyMode"]').forEach(r=>r.addEventListener("change", ()=>applySafetyMode(r.value)));
+
+    const el_filterIncludeNonLogin=document.getElementById("filterIncludeNonLogin"); if(el_filterIncludeNonLogin) el_filterIncludeNonLogin.addEventListener("change", ()=>refreshAll());
+  const el_sortMode=document.getElementById("sortMode"); if(el_sortMode) el_sortMode.addEventListener("change", ()=>refreshAll());
+  const el_resetRuleMarksBtn=document.getElementById("resetRuleMarksBtn"); if(el_resetRuleMarksBtn) el_resetRuleMarksBtn.addEventListener("change", ()=>refreshAll());
+  const el_undoGoBtn=document.getElementById("undoGoBtn"); if(el_undoGoBtn) el_undoGoBtn.addEventListener("change", ()=>refreshAll());
+
+  function undoLastGo(){
+    if(!lastDeletedSnapshot){
+      setStatus("Nothing to undo yet.", "info", 1800);
+      return;
+    }
+    deleted = new Set(Array.from(lastDeletedSnapshot));
+    for(const k of Object.keys(lastRuleMarks)){ lastRuleMarks[k].clear(); }
+    if(lastRuleMarksSnapshot){
+      for(const k of Object.keys(lastRuleMarksSnapshot)){
+        if(lastRuleMarks[k]) lastRuleMarksSnapshot[k].forEach(x=>lastRuleMarks[k].add(x));
+      }
+    }
+    hasAppliedGo = false;
+    appliedAt = null;
+    setStatus("Undid last GO (restored previous selection state).", "info", 2200);
+    refreshAll();
+  }
+  const undoBtn = document.getElementById("undoGoBtn");
+  if(undoBtn){
+    undoBtn.addEventListener("click", ()=>runWithSpinner(()=>undoLastGo(), "Undoing…", "Restoring previous selection.", "goSpinner"));
+  }
+
+  function resetRuleSelections(){
+    const keys = ["exact","nullPwDupes","allNullPw","blankUP","fuzzy"];
+    let removed=0;
+    keys.forEach(k=>{
+      if(!lastRuleMarks[k]) return;
+      for(const id of Array.from(lastRuleMarks[k])){
+        if(deleted.has(id)){
+          delDel(id);
+          removed++;
+        }
+      }
+      lastRuleMarks[k].clear();
+    });
+    setStatus(`Reset rule selections (unmarked ${removed} item(s)).`, "info", 2200);
+    refreshAll();
+  }
+  const resetBtn = document.getElementById("resetRuleMarksBtn");
+  if(resetBtn){
+    resetBtn.addEventListener("click", ()=>runWithSpinner(()=>resetRuleSelections(), "Resetting…", "Clearing rule-driven marks.", "goSpinner"));
+  }
+
+  function openWhyModal(it){
+    const modal = document.getElementById("whyModal");
+    const body = document.getElementById("whyBody");
+    if(!modal || !body) return;
+    const k = itemKey(it.__src, it.id);
+    const reasons=[];
+    if(lastRuleMarks.exact?.has(k)) reasons.push("Exact duplicate (same username + password). Oldest marked.");
+    if(lastRuleMarks.nullPwDupes?.has(k)) reasons.push("Null-password dupe: same username exists with real password.");
+    if(lastRuleMarks.allNullPw?.has(k)) reasons.push("Null-password login (all empty-password logins selected).");
+    if(lastRuleMarks.blankUP?.has(k)) reasons.push("Blank username + password login.");
+    if(lastRuleMarks.fuzzy?.has(k)) reasons.push("Fuzzy match suggestion (similar).");
+    if(superSafeExactMarks?.has(k)) reasons.push("Super-safe exact selection (oldest exact dupe).");
+    if(reasons.length===0) reasons.push("Manually selected or selected by another rule.");
+    body.innerHTML = `<div class="space-y-2">${reasons.map(r=>`<div>• ${escapeHtml(r)}</div>`).join("")}</div>`;
+    modal.classList.remove("hidden"); modal.classList.add("flex");
+  }
+  function closeWhyModal(){ const m=document.getElementById("whyModal"); if(!m) return; m.classList.add("hidden"); m.classList.remove("flex"); }
+  const closeWhy = document.getElementById("closeWhyBtn"); if(closeWhy) closeWhy.addEventListener("click", ()=>closeWhyModal());
+
+  function openCompareDrawer(items){
+    const d = document.getElementById("compareDrawer");
+    const b = document.getElementById("compareBody");
+    if(!d || !b) return;
+    b.innerHTML = items.slice(0,2).map(it=>{
+      const host = getPrimaryDomain(it)||"";
+      const user = it.login?.username || "";
+      const pw = it.login?.password || "";
+      const notes = (it.notes||"").toString();
+      const uri = (it.login?.uris && it.login.uris[0]?.uri) ? it.login.uris[0].uri : "";
+      return `<div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+        <div class="text-sm font-black text-slate-900">${escapeHtml(it.name||"(no name)")}</div>
+        <div class="mt-2 text-xs font-bold text-slate-700">Host: <span class="font-extrabold">${escapeHtml(host)}</span></div>
+        <div class="mt-1 text-xs font-bold text-slate-700">Username: <span class="font-extrabold">${escapeHtml(user)}</span></div>
+        <div class="mt-1 text-xs font-bold text-slate-700">Password: <span class="font-extrabold">${escapeHtml(pw)}</span></div>
+        <div class="mt-1 text-[11px] font-semibold text-slate-600">URI: ${escapeHtml(uri)}</div>
+        <div class="mt-2 text-[11px] font-semibold text-slate-600">Notes: ${escapeHtml(notes.slice(0,160))}${notes.length>160?'…':''}</div>
+        <div class="mt-2 text-[11px] font-bold text-slate-500">Revision: ${escapeHtml(it.revisionDate||"")}</div>
+      
+    <details class="mt-3 rounded-xl border border-rose-200 bg-rose-50 p-3">
+      <summary class="cursor-pointer select-none text-sm font-black text-rose-900">Organization import (advanced)</summary>
+      <div class="mt-3 space-y-3">
+        <label class="flex items-start gap-2 text-sm font-semibold text-rose-900">
+          <input type="checkbox" id="optForceOrgAll" class="mt-1">
+          <span>
+            Force ALL exported items into an Organization + Collection (on export)
+            <div class="mt-1 text-[11px] font-semibold text-rose-900/80">
+              Use only if this JSON export already contains your Organization/Collections. This will rewrite items to be org-assigned.
+            </div>
+          </span>
+        </label>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+          <label class="text-xs font-extrabold text-rose-900">
+            Organization
+            <select id="orgSelect" class="mt-1 w-full rounded-lg border border-rose-300 bg-white px-3 py-1.5 text-sm font-semibold">
+              <option value="">(detecting…)</option>
+            </select>
+          </label>
+
+          <label class="text-xs font-extrabold text-rose-900">
+            Target collection
+            <select id="collectionSelect" class="mt-1 w-full rounded-lg border border-rose-300 bg-white px-3 py-1.5 text-sm font-semibold">
+              <option value="">(detecting…)</option>
+              <option value="__new__">Create new collection…</option>
+            </select>
+          </label>
+        </div>
+
+        <label class="text-xs font-extrabold text-rose-900">
+          New collection name (if creating)
+          <input id="newCollectionName" class="mt-1 w-full rounded-lg border border-rose-300 bg-white px-3 py-1.5 text-sm font-semibold" placeholder="e.g., Imported — Review">
+        </label>
+
+        <div class="rounded-lg border border-rose-200 bg-white p-2 text-[11px] font-semibold text-rose-900/80">
+          Notes:
+          <ul class="list-disc pl-5 mt-1 space-y-1">
+            <li>This does NOT delete anything in Bitwarden. It only changes the JSON you import.</li>
+            <li>Bitwarden will reject org items without collections — this tool will ensure every item gets a collection.</li>
+            <li>If the org id doesn’t match your account org, Bitwarden import may still fail.</li>
+          </ul>
+        </div>
+      </div>
+    </details>
+
+</div>`;
+    }).join("");
+    d.classList.remove("hidden");
+  }
+  const closeCompare = document.getElementById("closeCompareBtn"); if(closeCompare) closeCompare.addEventListener("click", ()=>document.getElementById("compareDrawer")?.classList.add("hidden"));
+
+  function getExactGroupForItem(it){
+    const ex = computeExactDupes();
+    if(!ex || !ex.groups) return null;
+    const k = itemKey(it.__src,it.id);
+    for(const g of ex.groups.values()){
+      if(g.items?.some(x=>itemKey(x.__src,x.id)===k)) return g.items;
+    }
+    return null;
+  }
+
+  document.addEventListener("click", (e)=>{
+    const t = e.target;
+    if(!(t instanceof HTMLElement)) return;
+    if(t.matches("button[data-why]")){
+      const card = t.closest("[data-itemkey]");
+      const k = card?.getAttribute("data-itemkey");
+      if(!k) return;
+      const it = combinedItems().find(x=>itemKey(x.__src,x.id)===k);
+      if(it) openWhyModal(it);
+    }
+    if(t.matches("button[data-compare]")){
+      const card = t.closest("[data-itemkey]");
+      const k = card?.getAttribute("data-itemkey");
+      if(!k) return;
+      const it = combinedItems().find(x=>itemKey(x.__src,x.id)===k);
+      if(!it) return;
+      const grp = getExactGroupForItem(it);
+      if(grp && grp.length>1) openCompareDrawer(grp);
+      else setStatus("No exact-duplicate group found to compare for this item.", "info", 2200);
+    }
+  });
+  const el_reviewMode=document.getElementById("reviewMode"); if(el_reviewMode) el_reviewMode.addEventListener("change", ()=>render());
+
+  const orgChk = document.getElementById("optForceOrgAll");
+  if(orgChk){
+    orgChk.addEventListener("change", ()=>{
+      if(orgChk.checked) setStatus("Org import enabled: exports will assign ALL items to the chosen org + collection.", "warn", 4000);
+      else setStatus("Org import disabled.", "info", 2000);
+      populateOrgUI();
+    });
+  }
+})();
+</script>
+
+  <!-- Super-safe confirmation modal -->
+  <div id="superSafeModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/40 p-4">
+    <div class="w-full max-w-lg rounded-2xl bg-white shadow-xl border border-slate-200">
+      <div class="p-5">
+        <div class="text-lg font-black text-slate-900">Super-safe exact-dupe selection</div>
+        <div class="mt-2 text-sm font-semibold text-slate-700">
+          This will mark for deletion <span class="font-black">only</span> the <span class="font-black">oldest</span> item in each
+          <span class="font-black">exact duplicate</span> set (same username + password).
+          It does <span class="font-black">not</span> apply fuzzy rules, null-password rules, or URI normalization.
+        </div>
+        <div class="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm font-semibold text-slate-700">
+          Will mark: <span class="font-black" id="superSafeCount">0</span> item(s)
+        </div>
+
+        <div class="mt-4">
+          <div class="text-xs font-bold text-slate-700">Type <span class="font-black">DELETE</span> to confirm</div>
+          <input id="superSafeConfirmInput" class="mt-2 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold"
+                 placeholder="DELETE" />
+        </div>
+
+        <div class="mt-5 flex items-center justify-end gap-2">
+          <button id="superSafeCancelBtn" class="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-extrabold hover:bg-slate-100">
+            Cancel
+          </button>
+          <button id="superSafeApplyBtn" class="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-black text-white hover:bg-emerald-700">
+            Mark exact dupes
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <div id="compareDrawer" class="fixed inset-x-0 bottom-0 z-50 hidden">
+    <div class="mx-auto max-w-6xl rounded-t-2xl border border-slate-200 bg-white shadow-2xl">
+      <div class="flex items-center justify-between border-b border-slate-200 p-4">
+        <div class="text-sm font-black text-slate-900">Compare duplicates</div>
+        <button id="closeCompareBtn" class="rounded-lg border border-slate-300 px-3 py-1 text-xs font-extrabold hover:bg-slate-100">Close</button>
+      </div>
+      <div id="compareBody" class="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 text-sm"></div>
+    </div>
+  </div>
+
+  <div id="whyModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/40 p-4">
+    <div class="w-full max-w-lg rounded-2xl bg-white shadow-xl border border-slate-200">
+      <div class="p-5">
+        <div class="text-lg font-black text-slate-900">Why is this selected?</div>
+        <div class="mt-2 text-sm font-semibold text-slate-700" id="whyBody">—</div>
+        <div class="mt-5 flex items-center justify-end">
+          <button id="closeWhyBtn" class="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-extrabold hover:bg-slate-100">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom: Deletion preview + Selected items list -->
+  <div class="mt-6 w-full max-w-screen-2xl mx-auto px-6 pb-10">
+    <div class="w-full rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="text-sm font-black text-slate-800 uppercase tracking-wide">Deletion preview</div>
+        <div id="selectedCounts" class="text-xs font-extrabold text-slate-700">Marked: 0</div>
+      </div>
+      <div class="mt-2 text-sm font-semibold text-slate-700" id="deleteStatsSummary">No deletions marked yet.</div>
+      <div class="mt-2 text-xs text-slate-600 font-semibold" id="deleteStatsBreakdown"></div>
+
+      <div class="mt-2">
+        <div class="flex items-center justify-between gap-3">
+          <div class="text-sm font-black text-slate-800 uppercase tracking-wide">Selected items</div>
+          <div class="text-xs font-semibold text-slate-500">Wider list to review what will be removed.</div>
+        </div>
+        <div class="smooth-scroll-panel mt-3 overflow-auto rounded-xl border border-slate-200">
+          <table class="min-w-full text-sm">
+            <thead class="bg-slate-50 text-xs font-black text-slate-700">
+              <tr>
+                <th class="px-3 py-1.5 text-left">Domain</th>
+                <th class="px-3 py-1.5 text-left">Name</th>
+                <th class="px-3 py-1.5 text-left">Username</th>
+                <th class="px-3 py-1.5 text-left">Password</th>
+                <th class="px-3 py-1.5 text-left">Folder</th>
+                <th class="px-3 py-1.5 text-left">Vault</th>
+                <th class="px-3 py-1.5 text-left">Why</th>
+              </tr>
+            </thead>
+            <tbody id="selectedItemsTbody" class="divide-y divide-slate-200"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>
